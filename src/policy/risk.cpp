@@ -68,7 +68,9 @@ RiskResult assess(const solana::TxSummary& tx, RiskLevel appLevel, const std::st
   }
   r.level = maxLevel(r.deviceLevel, appLevel);
 
-  if (!r.flags.empty() && r.deviceLevel >= appLevel) {
+  // A device finding is always shown: app-supplied text must never be able to
+  // paper over it (e.g. "KNOWN RECIPIENT" on a never-seen address).
+  if (!r.flags.empty()) {
     r.reason = r.flags.front();
   } else if (!appReason.empty()) {
     r.reason = lcdSanitize(appReason).substr(0, kLcdCols);

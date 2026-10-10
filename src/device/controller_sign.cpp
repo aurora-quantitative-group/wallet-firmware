@@ -19,7 +19,7 @@ ui::Rgb colorFor(policy::RiskLevel level) {
   return ui::colors::kHigh;
 }
 
-constexpr size_t kMaxMemoPages = 4;
+constexpr size_t kMaxMemoPages = 6;
 constexpr size_t kMaxAppReason = 64;
 
 }  // namespace
@@ -91,6 +91,8 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {
     }
   }
   blindOnly_ = !tx.fullyRecognised() && !s_.config.allowBlindSigning;
+  // A blind-signed transaction never makes its recipients "known".
+  if (!tx.fullyRecognised()) reviewRecipients_.clear();
   buildReviewPages(tx);
   LOG_INFO("sign_tx: %zu transfer(s), %zu unknown ix, app=%s device=%s -> %s (%s)",
            tx.transfers.size(), tx.unknown.size(), policy::toString(appLevel),
@@ -137,20 +139,26 @@ void Controller::buildReviewPages(const solana::TxSummary& tx) {
       }
       pages_.push_back({"TO " + abbreviateAddress(address), "", true});
     }
-    // Middle button scrolls through the full address.
+    // Middle scrolls through the full address. For a first-time recipient it
+    // must be read in full: 4+4 characters are easy to imitate (address poisoning).
+    const bool isNew = std::find(risk_.newRecipients.begin(), risk_.newRecipients.end(), t.to) !=
+                       risk_.newRecipients.end();
     pages_.push_back({address.substr(0, 16), address.size() > 16 ? address.substr(16, 16) : "",
-                      false});
-    if (address.size() > 32) pages_.push_back({address.substr(32), "(FULL ADDRESS)", false});
+                      isNew});
+    if (address.size() > 32) pages_.push_back({address.substr(32), "(FULL ADDRESS)", isNew});
   }
   if (n == 0 && tx.unknown.empty()) pages_.push_back({"SIGN TX", "NO SOL TRANSFER", true});
 
+  // Every memo page is labelled on the top line, so memo text can never pose
+  // as a firmware screen (e.g. a fake "RISK: LOW").
   for (const auto& memo : tx.memos) {
     const std::string text = lcdSanitize(memo);
-    pages_.push_back({"MEMO:", text.substr(0, 16), true});
-    for (size_t off = 16, pagesAdded = 1; off < text.size() && pagesAdded < kMaxMemoPages;
-         off += 32, ++pagesAdded) {
-      pages_.push_back({text.substr(off, 16), off + 16 < text.size() ? text.substr(off + 16, 16) : "",
-                        false});
+    const size_t chunks = std::max<size_t>(1, (text.size() + kLcdCols - 1) / kLcdCols);
+    const size_t shown = std::min(chunks, kMaxMemoPages);
+    for (size_t i = 0; i < shown; ++i) {
+      std::string top = "MEMO " + std::to_string(i + 1) + "/" + std::to_string(shown);
+      if (i + 1 == shown && chunks > shown) top += " (CUT)";
+      pages_.push_back({top, text.substr(i * kLcdCols, kLcdCols), i == 0});
     }
   }
   if (tx.maxPriorityFeeLamports > 0) {
@@ -158,9 +166,10 @@ void Controller::buildReviewPages(const solana::TxSummary& tx) {
     pages_.push_back({"PRIORITY FEE",
                       fee.size() <= kLcdCols ? fee : formatSol(tx.maxPriorityFeeLamports), true});
   }
-  // A red screen must explain itself before it can be approved.
+  // A yellow or red screen must explain itself before it can be approved:
+  // the colour alone is easy to miss, and some boards have no backlight.
   pages_.push_back({std::string("RISK: ") + policy::toLabel(risk_.level), risk_.reason,
-                    risk_.level == policy::RiskLevel::High});
+                    risk_.level > policy::RiskLevel::Low});
   pages_.push_back(blindOnly_ ? Page{"CANNOT SIGN", "L: REJECT", false}
                               : Page{"HOLD R TO SIGN", "L:REJECT M:NEXT", false});
 }
@@ -181,7 +190,7 @@ void Controller::startReview() {
 void Controller::showReviewPage() {
   mode_ = Mode::Review;
   hint_.clear();  // the user moved on; show the page itself
-  seen_[pageIndex_] = true;
+  // render() marks the page seen once it has really been drawn.
   const Page& p = pages_[pageIndex_];
   base_ = {p.top, p.bottom, colorFor(risk_.level)};
 }
@@ -194,7 +203,7 @@ void Controller::onReviewButton(const ui::ButtonEvent& ev) {
     pageIndex_ = (pageIndex_ + 1) % pages_.size();
     showReviewPage();
   } else if (ev.kind == Kind::Hold && ev.button == ui::Button::Right) {
-    if (!holdStartedInSession(ev)) return;
+    if (!holdStartedInSession(ev) || !s_.screen.healthy()) return;
     std::string blocker;
     if (blindOnly_) {
       blocker = "CANNOT SIGN";
