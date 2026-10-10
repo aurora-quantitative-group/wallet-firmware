@@ -183,7 +183,9 @@ int main(int argc, char** argv) {
   if (opt.sim) {
     int controlFd = STDIN_FILENO;
     if (!opt.simControl.empty()) {
-      controlFd = ::open(opt.simControl.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+      // O_RDWR keeps a writer open on a FIFO, so it never reports EOF
+      // between test clients.
+      controlFd = ::open(opt.simControl.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
       if (controlFd < 0) {
         LOG_ERROR("cannot open %s: %s", opt.simControl.c_str(), std::strerror(errno));
         return 1;
