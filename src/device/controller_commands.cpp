@@ -120,7 +120,6 @@ void Controller::handleHandshake(const Ctx& ctx, const json& req) {
     return;
   }
   std::copy(raw->begin(), raw->end(), handshakeClientKey_.begin());
-  channel_.reset();
   if (ks.ready()) {
     pending_ = Pending::Handshake;
     pendingCtx_ = plain;

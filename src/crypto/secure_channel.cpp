@@ -63,7 +63,8 @@ bool SecureChannel::deriveKeys(const uint8_t shared[32], const std::array<uint8_
 bool SecureChannel::accept(const std::array<uint8_t, 32>& clientEphemeral, const KeyPair& identity,
                            std::array<uint8_t, 32>& deviceEphemeral,
                            std::array<uint8_t, 64>& signature, std::string& err) {
-  reset();
+  // The current channel (if any) stays usable until the new one is complete,
+  // so a bogus handshake cannot knock out the app's session.
   Secret<32> devSecret;
   randombytes_buf(devSecret.data(), devSecret.size());
   crypto_scalarmult_base(deviceEphemeral.data(), devSecret.data());

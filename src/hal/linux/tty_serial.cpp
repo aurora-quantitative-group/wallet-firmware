@@ -39,9 +39,11 @@ bool SerialLink::readSome(std::string& out) {
 }
 
 void SerialLink::queue(const std::string& data) {
+  // Drop the new line, never part of the queue: a partly written line must
+  // be finished or the host would see two lines glued together.
   if (outbox_.size() + data.size() > kMaxQueuedBytes) {
-    LOG_WARN("serial: host is not reading; dropping %zu queued bytes", outbox_.size());
-    outbox_.clear();
+    LOG_WARN("serial: host is not reading; dropping a %zu-byte reply", data.size());
+    return;
   }
   outbox_ += data;
 }

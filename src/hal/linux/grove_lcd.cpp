@@ -41,7 +41,10 @@ bool GroveLcd::init() {
   if (!bus_.open()) return false;
   // Power-on sequence from rgb_lcd::begin(): function set three times.
   const uint8_t function = kFunctionSet | kTwoLine;
-  ::usleep(50000);
+  // The 50 ms power-on wait is only needed once; re-inits during error
+  // recovery must not stall the 5 ms button sampling loop that long.
+  if (!poweredUp_) ::usleep(50000);
+  poweredUp_ = true;
   if (!command(function)) {
     LOG_ERROR("lcd: no ACK at 0x%02x on %s (check wiring: SDA pin 3, SCL pin 5)", lcdAddress_,
               bus_.path().c_str());

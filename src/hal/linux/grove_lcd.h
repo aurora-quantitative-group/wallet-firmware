@@ -34,6 +34,7 @@ class GroveLcd final : public Display {
   Backlight backlight_ = Backlight::None;
   uint8_t backlightAddress_ = 0;
   bool warnedNoBacklight_ = false;
+  bool poweredUp_ = false;
 };
 
 }  // namespace wfw::hal

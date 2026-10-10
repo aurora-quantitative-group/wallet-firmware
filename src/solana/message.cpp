@@ -56,6 +56,7 @@ class Reader {
     return true;
   }
   bool atEnd() const { return pos_ == len_; }
+  size_t remaining() const { return len_ - pos_; }
 
  private:
   const uint8_t* data_;
@@ -128,7 +129,8 @@ bool parseMessage(const uint8_t* data, size_t len, Message& out, std::string& er
   }
 
   uint16_t numInstructions = 0;
-  if (!r.compact(numInstructions)) {
+  // Each instruction takes at least 3 bytes; check before allocating.
+  if (!r.compact(numInstructions) || numInstructions > r.remaining() / 3) {
     err = "bad instruction count";
     return false;
   }
