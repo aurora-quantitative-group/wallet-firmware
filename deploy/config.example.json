@@ -1,0 +1,38 @@
+// /etc/wallet-fw/config.json. Every key is optional; these are the defaults.
+// Comments are allowed. Restart the service after editing:
+//   sudo systemctl restart wallet-fw
+{
+  // "/dev/ttyGS0" = USB gadget (Step 2). "/dev/serial0" = Pico UART fallback.
+  "serial_device": "/dev/ttyGS0",
+  "serial_baud": 115200,
+  "data_dir": "/var/lib/wallet-fw",
+  "device_name": "",
+
+  "i2c_bus": "/dev/i2c-1",
+  "lcd_address": 62,
+  "backlight_address": -1,
+  "backlight_brightness": 100,
+
+  "gpio_chip": "gpiochip0",
+  "gpio_left": 17,
+  "gpio_middle": 27,
+  "gpio_right": 22,
+  "gpio_buzzer": 23,
+  "buttons_active_high": true,
+  "debounce_ms": 30,
+  "hold_confirm_ms": 2000,
+  "buzzer_enabled": true,
+
+  // A first-time recipient above this many lamports is red (1 SOL).
+  "risk_limit_lamports": 1000000000,
+  "max_priority_fee_lamports": 10000000,
+  "allow_blind_signing": true,
+  "review_timeout_s": 180,
+  "setup_timeout_s": 900,
+
+  // Step 12 hardening. Turn on once the app supports it.
+  "pin_enabled": false,
+  "pin_length": 4,
+  "pin_max_attempts": 5,
+  "require_secure_channel": false
+}
