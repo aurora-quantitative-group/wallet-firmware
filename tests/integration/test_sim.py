@@ -130,9 +130,11 @@ class SimulatorEndToEnd(unittest.TestCase):
         from nacl.signing import VerifyKey
         sim = self.sim
         me, message, req = self.sign(RECIPIENT, 500_000_000)
-        s = sim.wait_screen(lambda s: s["top"].strip() == "SEND 0.50 SOL")
-        self.assertEqual(s["bottom"].strip(), "TO 7xKX..gAsU")
-        self.assertEqual(s["rgb"], YELLOW)
+        # The LCD is written row by row; wait for the complete page.
+        sim.wait_screen(lambda s: s["top"].strip() == "SEND 0.50 SOL" and
+                        s["bottom"].strip() == "TO 7xKX..gAsU" and s["rgb"] == YELLOW)
+        sim.press("m", "m", "m")  # new recipient: read the full address and risk page
+        sim.wait_screen(lambda s: s["top"].strip() == "RISK: MEDIUM")
         sim.press("h")
         reply = sim.dev.wait(req)
         self.assertTrue(reply["ok"], reply)
@@ -150,9 +152,8 @@ class SimulatorEndToEnd(unittest.TestCase):
         sim = self.sim
         other = host.b58encode(bytes([7]) * 32)
         _, _, req = self.sign(other, 2 * host.LAMPORTS_PER_SOL, risk="low")
-        s = sim.wait_screen(lambda s: s["top"].strip() == "SEND 2.00 SOL")
-        self.assertEqual(s["rgb"], RED)
-        self.assertEqual(s["bottom"].strip(), "TO " + other[:4] + ".." + other[-4:])
+        sim.wait_screen(lambda s: s["top"].strip() == "SEND 2.00 SOL" and s["rgb"] == RED and
+                        s["bottom"].strip() == "TO " + other[:4] + ".." + other[-4:])
         with open(sim.log) as f:
             self.assertIn('"buzzer":true', f.read())
         sim.press("l")
