@@ -141,7 +141,8 @@ What the device does:
 2. **Recognises the instructions:** System `transfer` (extra read-only accounts
    such as Solana Pay references are fine), ComputeBudget unit limit, price,
    heap and data-size, and Memo v1/v2. Anything else is shown as `UNKNOWN TX`
-   and is red.
+   and is red. By default it **can't be approved** (`allow_blind_signing: false`).
+   Treat the device as a SOL-transfer signer.
 3. **Applies its own risk rule.** The app's level can only be raised:
    - a recipient it has never signed for is at least `medium`;
    - a never-seen recipient receiving more than `risk_limit_lamports` (default 1 SOL) is `high`;
@@ -151,8 +152,13 @@ What the device does:
    address, memo, priority fee, the `RISK:` page and the hint page. It beeps on
    every request and plays a long tone for `high`.
 5. **Signs only after a 2 s hold** of the right button that started after the
-   prompt appeared. A red transaction also needs its risk page viewed. Left
-   rejects.
+   prompt appeared and while the LCD is working. Some pages must be viewed
+   first:
+   - every summary, memo and fee page;
+   - for yellow or red, the risk page;
+   - for a first-time recipient, the full address.
+
+   Left rejects. Memo text is always shown under a `MEMO i/n` label.
 
 The reply's `risk` and `reason` are what the device enforced, so log them as the
 Tiger Data `device_events` detail. After a signed transfer, the recipient is
@@ -200,7 +206,7 @@ Aborts the prompt that is waiting on the device. The waiting request gets
 | `cancelled` / `timeout` | Prompt aborted by `cancel` / not answered in time |
 | `phrase_mismatch` | `confirm_backup` words are wrong |
 | `backup_already_confirmed` | `show_words` / `confirm_backup` after confirmation |
-| `pin_locked` | Too many wrong PINs; restart the device |
+| `pin_locked` | Too many wrong PINs (the counter survives restarts). The device can't unlock this wallet any more: recover the funds by importing the 12 words into another wallet (e.g. Phantom), then `wallet-fw --wipe` and run `setup` for a new one. |
 | `secure_channel_required` | `require_secure_channel` is on and the request was not encrypted |
 | `no_secure_channel` / `decrypt_failed` / `handshake_failed` | Encrypted-channel errors |
 | `internal_error` | Bug or resource failure; check `journalctl -u wallet-fw` |
@@ -240,8 +246,9 @@ This is off unless the app starts it, or the device has `require_secure_channel`
    - Associated data is `"wfw1-c2d"` for app → device and `"wfw1-d2c"` for device → app.
    - The plaintext is the normal request/reply JSON.
 
-A new handshake replaces the channel, and the channel ends when the serial link
-resets. Reference implementations: `SecureSession` in `tools/wfw_host.py` and
+A successful handshake replaces the channel; a failed one leaves the current
+channel working. The channel ends when the serial link resets. A
+PIN-protected wallet relocks after `auto_lock_s` (default 300 s) without a prompt. Reference implementations: `SecureSession` in `tools/wfw_host.py` and
 `src/crypto/secure_channel.cpp`.
 
 ## Timing summary

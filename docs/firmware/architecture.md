@@ -79,17 +79,25 @@ prompting command gets `busy`.
 - **The device decides what is shown.** The screen is built from the message
   bytes, never from text sent by the app. The app's `reason` appears only on
   the risk page.
-- **Red needs its explanation seen.** A `high` transaction can't be approved
-  until its `RISK:` page has been viewed. For every transaction, each transfer
-  summary, memo, fee and unknown-instruction page must be seen.
+- **Warnings must be read.** Before approval, these pages must be seen:
+  - the `RISK:` page, for anything yellow or red;
+  - the full address, for a first-time recipient (4+4 characters are easy to forge);
+  - each transfer summary, memo, fee and unknown-instruction page.
+
+  "Seen" means it actually reached the LCD. An I2C failure resets this and
+  cancels any hold in progress.
+- **Memo text can't pose as firmware text.** Every memo page carries a
+  `MEMO i/n` top line, and a cut-off memo is marked `(CUT)`.
+- **Device findings win.** The app's `reason` never replaces a device flag.
+  Blind-signed transactions never make a recipient "known".
 - **Amounts are never truncated.** A long amount moves to its own line or lines.
 - **No display, no prompt.** If the LCD stops answering on I2C, prompts are
   refused with `display_unavailable` until it recovers. The renderer retries
   once a second.
 - **Unknown means red.** Unrecognised programs, non-transfer System
   instructions, transfers not from this wallet, lookup-table accounts and
-  duplicate ComputeBudget instructions all show `UNKNOWN TX` in red.
-  `allow_blind_signing: false` makes them unsignable.
+  duplicate ComputeBudget instructions all show `UNKNOWN TX` in red. They are
+  unsignable unless `allow_blind_signing` is turned on.
 
 ## Decisions
 
@@ -107,12 +115,18 @@ prompting command gets `busy`.
 | D10 | Third-party code is fetched at configure time, pinned by SHA-256, not committed | Keeps every commit small (≤ 400 lines) and makes upstream changes fail loudly. On the Pi, the first configure needs network. |
 | D11 | Single-threaded poll loop at 5 ms | Deterministic, no locking. 5 ms sampling is well inside the 30 ms debounce. |
 | D12 | PIN and encrypted channel are present but off by default | Step 12 says "only after Steps 1–11". Config flags turn them on once the app supports them. |
-| D13 | PIN attempts are limited per boot (default 5), and the device never wipes itself | Self-wipe at a hackathon risks bricking the demo. A restart resets the counter, and Argon2id slows guessing. This is documented as a limitation. |
+| D13 | The wrong-PIN counter is stored with the wallet. After `pin_max_attempts` (5) the wallet refuses to unlock, but is not deleted. A PIN-protected wallet relocks after `auto_lock_s` idle | Restarting can't reset the count. Not self-wiping avoids bricking a demo. The 12 words recover the funds in any BIP-39 wallet; the firmware itself has no restore-from-words (out of scope). |
+| D14 | Independent review (one subagent, read-only) before release | It found 11 issues and no critical ones; all were fixed with regression tests (see the traceability doc). |
 
 ## Known limitations
 
 - A Raspberry Pi has no secure element. The keystore sits on the SD card, and
-  a 4-digit PIN can be brute-forced offline by anyone holding the card.
+  a 4-digit PIN (Argon2id "interactive" cost) can be brute-forced offline in
+  minutes by anyone holding the card. The PIN mostly guards against casual use
+  of an unattended device.
+- The serial link does not authenticate the app. Any process on the laptop
+  that opens the port can send requests (including `handshake`). Approval
+  still always needs the physical button.
   This is a prototype of the signing flow, as the build manual's demo script states.
 - The device can't tell a recipient's account age or balance share. Those parts
   of the risk check stay in the app or backend (Gemini). The device's own rule

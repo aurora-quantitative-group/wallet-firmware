@@ -104,7 +104,7 @@ wallet, though the public faucet is often rate-limited (use faucet.solana.com).
 ## Tests
 
 ```sh
-./build/wfw_tests                                         # 71 unit tests
+./build/wfw_tests                                         # 78 unit tests
 python3 tests/integration/test_sim.py build/wallet-fw     # real binary over a PTY
 cmake -S . -B build-asan -DWFW_SANITIZE=ON                # ASan + UBSan build
 ```
