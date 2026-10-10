@@ -29,7 +29,11 @@ def cmd_setup(dev, args):
     reply = dev.request("setup", timeout=args.timeout)
     print("Wallet address:", reply["pubkey"])
     while True:
-        words = input("Type the 12 words to confirm your backup (or 'back' to see them again): ")
+        try:
+            words = input("Type the 12 words to confirm your backup (or 'back' to see them again): ")
+        except EOFError:
+            print("\nBackup not confirmed yet; run 'confirm-backup <12 words>' later.")
+            return
         if words.strip().lower() == "back":
             dev.request("show_words", timeout=args.timeout)
             continue
