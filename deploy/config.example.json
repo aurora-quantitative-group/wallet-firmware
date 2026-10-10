@@ -26,7 +26,8 @@
   // A first-time recipient above this many lamports is red (1 SOL).
   "risk_limit_lamports": 1000000000,
   "max_priority_fee_lamports": 10000000,
-  "allow_blind_signing": true,
+  // Unrecognised instructions are always red; true lets them be approved.
+  "allow_blind_signing": false,
   "review_timeout_s": 180,
   "setup_timeout_s": 900,
 
@@ -34,5 +35,6 @@
   "pin_enabled": false,
   "pin_length": 4,
   "pin_max_attempts": 5,
+  "auto_lock_s": 300,
   "require_secure_channel": false
 }

@@ -87,6 +87,7 @@ const std::map<std::string, Setter>& setters() {
       {"pin_enabled", boolean(&Config::pinEnabled)},
       {"pin_length", integer(&Config::pinLength, 4, 8)},
       {"pin_max_attempts", integer(&Config::pinMaxAttempts, 1, 20)},
+      {"auto_lock_s", integer(&Config::autoLockS, 0, 86400)},
       {"require_secure_channel", boolean(&Config::requireSecureChannel)},
   };
   return table;

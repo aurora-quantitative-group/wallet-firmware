@@ -73,6 +73,7 @@ class Controller {
 
   // controller.cpp: transport, dispatch, simple commands, idle/notice.
   void dispatch(const json& req, bool encrypted);
+  static void wipeWords(json& req);
   void reply(const Ctx& ctx, json body);
   void replyError(const Ctx& ctx, const char* code, const std::string& message = "");
   void finishPending(json body);
@@ -126,6 +127,7 @@ class Controller {
   Ctx pendingCtx_;
   TimeMs pendingDeadline_ = 0;
   TimeMs sessionStart_ = 0;  // a confirming hold must start after this
+  TimeMs lastActivity_ = 0;  // for auto-lock
   TimeMs noticeUntil_ = 0;
   ui::Screen noticeScreen_;
   std::string hint_;  // transient bottom-line override

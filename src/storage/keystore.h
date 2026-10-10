@@ -40,6 +40,9 @@ class Keystore {
   void lock();
   bool setBackupConfirmed(std::string& err);
   bool wipe(std::string& err);
+  // Wrong-PIN counter, stored with the wallet so a restart does not reset it.
+  int pinFailures() const { return pinFailures_; }
+  bool setPinFailures(int count, std::string& err);
 
   bool mnemonic(crypto::Mnemonic& out) const;  // requires ready()
   const crypto::KeyPair* keyPair() const { return ready() ? &keyPair_ : nullptr; }
@@ -60,6 +63,7 @@ class Keystore {
   PubKey publicKey_{};
   bool backupConfirmed_ = false;
   bool pinProtected_ = false;
+  int pinFailures_ = 0;
 
   // Encrypted blob as stored (kept so metadata updates can rewrite the file
   // without the PIN).

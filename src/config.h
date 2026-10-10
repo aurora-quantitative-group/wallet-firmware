@@ -36,14 +36,15 @@ struct Config {
   // Device risk rule (Step 7) and signing behaviour.
   uint64_t riskLimitLamports = 1000000000ULL;  // 1 SOL
   uint64_t maxPriorityFeeLamports = 10000000ULL;  // 0.01 SOL
-  bool allowBlindSigning = true;  // allow approving "UNKNOWN TX" (always red)
+  bool allowBlindSigning = false;  // true: "UNKNOWN TX" (always red) may be approved
   int reviewTimeoutS = 180;
   int setupTimeoutS = 900;
 
   // Hardening (Step 12), off by default so the app can integrate first.
   bool pinEnabled = false;
   int pinLength = 4;
-  int pinMaxAttempts = 5;  // per boot; then the device refuses until restart
+  int pinMaxAttempts = 5;  // persisted; then the device refuses until wiped
+  int autoLockS = 300;     // relock an idle PIN-protected wallet (0 = never)
   bool requireSecureChannel = false;
 };
 

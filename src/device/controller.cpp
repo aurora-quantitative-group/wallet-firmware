@@ -11,6 +11,8 @@ namespace wfw::device {
 Controller::Controller(Services services, Sender send)
     : s_(std::move(services)), send_(std::move(send)) {
   if (!s_.randomBytes) s_.randomBytes = [](uint8_t* b, size_t n) { randombytes_buf(b, n); };
+  pinFailures_ = s_.keystore.pinFailures();  // persisted: a restart does not reset it
+  lastActivity_ = s_.clock.nowMs();
 }
 
 void Controller::start() {
@@ -29,6 +31,7 @@ void Controller::onLine(const std::string& line) {
   const auto enc = req.find("enc");
   if (enc == req.end()) {
     dispatch(req, false);
+    wipeWords(req);
     return;
   }
   if (!enc->is_string()) {
@@ -53,6 +56,16 @@ void Controller::onLine(const std::string& line) {
     return;
   }
   dispatch(inner, true);
+  wipeWords(inner);
+}
+
+// confirm_backup carries the recovery words; do not leave them in freed heap.
+void Controller::wipeWords(json& req) {
+  const auto w = req.find("words");
+  if (w != req.end() && w->is_string()) {
+    auto& s = w->get_ref<std::string&>();
+    if (!s.empty()) sodium_memzero(s.data(), s.size());
+  }
 }
 
 void Controller::onOverflow() {
@@ -127,6 +140,7 @@ void Controller::finishPending(json body) {
   const Ctx ctx = pendingCtx_;
   pending_ = Pending::None;
   pendingCtx_ = Ctx{};
+  lastActivity_ = s_.clock.nowMs();
   reply(ctx, std::move(body));
 }
 
@@ -149,7 +163,7 @@ bool Controller::checkReadyForPrompt(const Ctx& ctx) {
   }
   if (s_.keystore.pinProtected() && !s_.keystore.ready() &&
       pinFailures_ >= s_.config.pinMaxAttempts) {
-    replyError(ctx, err::kPinLocked, "too many wrong PINs; restart the device");
+    replyError(ctx, err::kPinLocked, "too many wrong PINs; restore from the recovery words");
     return false;
   }
   return true;
@@ -159,6 +173,7 @@ void Controller::beginPending(Pending kind, const Ctx& ctx, int timeoutS) {
   pending_ = kind;
   pendingCtx_ = ctx;
   sessionStart_ = s_.clock.nowMs();
+  lastActivity_ = sessionStart_;
   pendingDeadline_ = sessionStart_ + static_cast<TimeMs>(timeoutS) * 1000;
   hint_.clear();
 }
@@ -201,6 +216,14 @@ void Controller::tick() {
   }
   if (mode_ == Mode::Notice && now >= noticeUntil_) showIdle();
   if (!hint_.empty() && now >= hintUntil_) hint_.clear();
+  // Auto-lock: a PIN-protected wallet does not stay unlocked while unattended.
+  auto& ks = s_.keystore;
+  if (ks.pinProtected() && ks.ready() && !sessionActive() && s_.config.autoLockS > 0 &&
+      now - lastActivity_ >= static_cast<TimeMs>(s_.config.autoLockS) * 1000) {
+    LOG_INFO("auto-lock after %d s idle", s_.config.autoLockS);
+    ks.lock();
+    if (mode_ == Mode::Idle) showIdle();
+  }
   render();
 }
 
@@ -261,6 +284,19 @@ void Controller::render() {
     out.bottom = holdBar();
   }
   s_.screen.show(out);
+
+  // Only what actually reached the LCD counts. While the display is failing,
+  // nothing is "seen" and no confirming hold can be in progress.
+  if (!s_.screen.healthy()) {
+    if (mode_ == Mode::Review) {
+      std::fill(seen_.begin(), seen_.end(), false);
+      sessionStart_ = s_.clock.nowMs();
+    } else if (mode_ == Mode::Words) {
+      lastWordShownAt_ = s_.clock.nowMs();
+    }
+  } else if (mode_ == Mode::Review && pageIndex_ < seen_.size()) {
+    seen_[pageIndex_] = true;
+  }
 }
 
 }  // namespace wfw::device

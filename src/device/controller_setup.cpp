@@ -236,6 +236,7 @@ void Controller::submitPin() {
       wipeString(pinDigits_);
       if (ok) {
         pinFailures_ = 0;
+        if (!s_.keystore.setPinFailures(0, why)) LOG_WARN("pin counter: %s", why.c_str());
         LOG_INFO("keystore unlocked");
         auto then = std::move(afterUnlock_);
         afterUnlock_ = nullptr;
@@ -250,11 +251,15 @@ void Controller::submitPin() {
         return;
       }
       ++pinFailures_;
+      // Persist before saying anything, so power-cycling cannot reset the count.
+      if (!s_.keystore.setPinFailures(pinFailures_, why)) {
+        LOG_ERROR("pin counter: %s", why.c_str());
+      }
       LOG_WARN("wrong PIN (%d of %d)", pinFailures_, s_.config.pinMaxAttempts);
       if (pinFailures_ >= s_.config.pinMaxAttempts) {
-        finishPendingError(err::kPinLocked, "too many wrong PINs; restart the device");
+        finishPendingError(err::kPinLocked, "too many wrong PINs; restore from the recovery words");
         clearSecrets();
-        showNotice("TOO MANY TRIES", "RESTART DEVICE", ui::colors::kHigh, 5000);
+        showNotice("TOO MANY TRIES", "WALLET LOCKED", ui::colors::kHigh, 5000);
         return;
       }
       startPin(PinPurpose::Unlock);

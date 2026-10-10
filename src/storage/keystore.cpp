@@ -77,6 +77,7 @@ bool Keystore::load(std::string& err) {
     auto pub = decodeAddress(doc.at("pubkey").get<std::string>());
     if (!pub) return fail("keystore public key is invalid");
     backupConfirmed_ = doc.value("backup_confirmed", false);
+    pinFailures_ = doc.value("pin_failures", 0);
     const json& secret = doc.at("secret");
     const std::string scheme = secret.at("scheme").get<std::string>();
 
@@ -142,6 +143,7 @@ bool Keystore::persist(std::string& err) {
               {"version", kVersion},
               {"pubkey", address()},
               {"backup_confirmed", backupConfirmed_},
+              {"pin_failures", pinFailures_},
               {"secret", secret}};
   std::string text = doc.dump(2) + "\n";
   const bool ok = fs::writeFileAtomic(path_, text, 0600, err);
@@ -159,6 +161,7 @@ bool Keystore::create(const uint8_t entropy[crypto::kEntropyBytes], const std::s
   if (!adoptEntropy(entropy, err)) return false;
   backupConfirmed_ = false;
   pinProtected_ = !pin.empty();
+  pinFailures_ = 0;
 
   if (pinProtected_) {
     salt_.resize(crypto_pwhash_SALTBYTES);
@@ -235,6 +238,21 @@ bool Keystore::setBackupConfirmed(std::string& err) {
   return true;
 }
 
+bool Keystore::setPinFailures(int count, std::string& err) {
+  if (!initialized() || (!pinProtected_ && !ready())) {
+    err = "not initialized";
+    return false;
+  }
+  if (count == pinFailures_) return true;
+  const int previous = pinFailures_;
+  pinFailures_ = count;
+  if (!persist(err)) {
+    pinFailures_ = previous;
+    return false;
+  }
+  return true;
+}
+
 bool Keystore::wipe(std::string& err) {
   if (!fs::removeFile(path_, err)) return false;
   entropy_.wipe();
@@ -242,6 +260,7 @@ bool Keystore::wipe(std::string& err) {
   keyPair_.publicKey = {};
   publicKey_ = {};
   backupConfirmed_ = false;
+  pinFailures_ = 0;
   pinProtected_ = false;
   salt_.clear();
   nonce_.clear();

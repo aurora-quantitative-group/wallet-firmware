@@ -291,7 +291,11 @@ int main(int argc, char** argv) {
         device::LineFramer::Output out;
         framer.feed(inbound.data(), inbound.size(), out);
         for (size_t i = 0; i < out.overflows; ++i) controller.onOverflow();
-        for (const auto& line : out.lines) controller.onLine(line);
+        for (auto& line : out.lines) {
+          controller.onLine(line);
+          sodium_memzero(line.data(), line.size());  // may hold typed recovery words
+        }
+        sodium_memzero(inbound.data(), inbound.size());
       } else if (re & (POLLHUP | POLLERR | POLLNVAL)) {
         healthy = false;
       }
