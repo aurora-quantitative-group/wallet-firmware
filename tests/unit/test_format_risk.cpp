@@ -75,6 +75,12 @@ TEST(risk_new_recipient_is_at_least_medium) {
   CHECK(r.newRecipients[0] == kNew);
 }
 
+TEST(risk_device_flag_beats_app_reason) {
+  const RiskResult r = run(sendTo(kNew, 1), RiskLevel::High, "KNOWN RECIPIENT");
+  CHECK(r.level == RiskLevel::High);
+  CHECK_EQ(r.reason, std::string("NEW RECIPIENT"));
+}
+
 TEST(risk_new_recipient_over_limit_is_high_whatever_the_app_says) {
   const RiskResult r = run(sendTo(kNew, kLamportsPerSol + 1), RiskLevel::Low);
   CHECK(r.level == RiskLevel::High);

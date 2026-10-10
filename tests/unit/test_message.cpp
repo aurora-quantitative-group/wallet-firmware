@@ -179,6 +179,11 @@ TEST(rejects_malformed_messages) {
   std::copy(b.begin() + 4, b.begin() + 36, b.begin() + 36);
   CHECK(!parse(b, m));  // duplicate account keys
   b = good;
+  b[3 + 1 + 3 * 32 + 32] = 0x7f;  // 127 instructions claimed, 15 bytes left
+  std::string err;
+  CHECK(!parseMessage(b.data(), b.size(), m, err));
+  CHECK_EQ(err, std::string("bad instruction count"));
+  b = good;
   b[0] = 0x81;
   CHECK(!parse(b, m));  // v1 message
   CHECK(!parse(Bytes{}, m));

@@ -47,6 +47,11 @@ TEST(sign_new_recipient_is_yellow_then_remembered) {
   h.boot();
   h.send(signReq(kTransferMsgHex, "low"));
   CHECK(h.colorIs(kMedium));
+  // A first-time recipient: full address and risk page must be read first.
+  CHECK(h.hold(Button::Right).is_null());
+  CHECK_EQ(h.bottom(), std::string("M: SEE ALL PAGES"));
+  h.clicks(Button::Middle, 3);
+  CHECK_EQ(h.top(), std::string("RISK: MEDIUM"));
   json r = h.hold(Button::Right);
   CHECK_EQ(r["ok"], true);
   CHECK_EQ(r["risk"], "medium");
@@ -137,7 +142,7 @@ TEST(sign_memo_and_priority_fee_pages) {
     h.click(Button::Middle);
     tops.push_back(h.top() + "|" + h.bottom());
   }
-  CHECK(std::find(tops.begin(), tops.end(), "MEMO:|coffee for alice") != tops.end());
+  CHECK(std::find(tops.begin(), tops.end(), "MEMO 1/1|coffee for alice") != tops.end());
   CHECK(std::find(tops.begin(), tops.end(), "PRIORITY FEE|<=0.000015 SOL") != tops.end());
   CHECK_EQ(h.hold(Button::Right)["ok"], true);
 }
