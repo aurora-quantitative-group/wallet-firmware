@@ -1,0 +1,11 @@
+# Build trees
+/build*/
+/out/
+
+# Third-party sources are downloaded and hash-checked by cmake/ThirdParty.cmake
+/third_party/
+
+# Simulator state and Python caches
+/sim-data*/
+__pycache__/
+*.pyc
