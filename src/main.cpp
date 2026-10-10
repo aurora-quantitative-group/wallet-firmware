@@ -136,6 +136,12 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (opt.verbose) log::setLevel(log::Level::Debug);
+#if !defined(WFW_HARDWARE)
+  if (!opt.sim && !opt.wipe) {
+    LOG_ERROR("built without hardware drivers (WFW_HARDWARE=OFF); use --sim");
+    return 1;
+  }
+#endif
   if (!crypto::init()) {
     LOG_ERROR("libsodium failed to initialise");
     return 1;
@@ -220,8 +226,7 @@ int main(int argc, char** argv) {
     buttonsHw = std::move(gpio);
     link = std::make_unique<hal::TtySerial>(cfg.serialDevice, cfg.serialBaud);
 #else
-    LOG_ERROR("built without hardware drivers (WFW_HARDWARE=OFF); use --sim");
-    return 1;
+    return 1;  // rejected above
 #endif
   }
 
