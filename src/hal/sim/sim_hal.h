@@ -33,6 +33,26 @@ class SimDisplay final : public Display {
   uint8_t rgb_[3] = {0, 0, 0};
 };
 
+// Drives the real display and also draws every frame on a second one
+// (--mirror-display: read an LCD that can't show text, e.g. without 5 V).
+// The mirror shows whatever the LCD shows, recovery words included.
+class MirrorDisplay final : public Display {
+ public:
+  MirrorDisplay(Display& real, Display& mirror) : real_(real), mirror_(mirror) {}
+  bool init() override { return real_.init() && mirror_.init(); }
+  bool clear() override { return mirror_.clear(), real_.clear(); }
+  bool print(int row, const std::string& text) override {
+    return mirror_.print(row, text), real_.print(row, text);
+  }
+  bool setRGB(uint8_t r, uint8_t g, uint8_t b) override {
+    return mirror_.setRGB(r, g, b), real_.setRGB(r, g, b);
+  }
+
+ private:
+  Display& real_;
+  Display& mirror_;
+};
+
 class SimBuzzer final : public Buzzer {
  public:
   SimBuzzer(const Clock& clock, std::string logPath);

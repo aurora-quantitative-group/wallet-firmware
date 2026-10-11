@@ -51,6 +51,7 @@ struct Options {
   bool verbose = false;
   bool wipe = false;
   bool hwTest = false;
+  bool mirrorDisplay = false;
   std::string tcpListen;
 };
 
@@ -64,6 +65,7 @@ void usage() {
       "  --wipe                 delete the wallet and known recipients (asks to confirm)\n"
       "  --hw-test              LCD pages / buttons / buzzer check (stop the service first)\n"
       "  --tcp-listen HOST:PORT DEVELOPMENT ONLY: serve the protocol over TCP, not serial\n"
+      "  --mirror-display       also print every LCD screen here (shows recovery words!)\n"
       "  --version              print the firmware version\n"
       "Simulator (no Pi hardware needed):\n"
       "  --sim                  console LCD, typed button commands, PTY serial port\n"
@@ -95,6 +97,7 @@ bool parseArgs(int argc, char** argv, Options& o) {
     else if (a == "--verbose") o.verbose = true;
     else if (a == "--wipe") o.wipe = true;
     else if (a == "--hw-test") o.hwTest = true;
+    else if (a == "--mirror-display") o.mirrorDisplay = true;
     else if (a == "--tcp-listen") ok = value(o.tcpListen);
     else if (a == "--version") {
       std::cout << "Aurora firmware (wallet-fw) " << WFW_VERSION << " (protocol " << device::kProtocolVersion << ")\n";
@@ -197,6 +200,8 @@ int main(int argc, char** argv) {
 
   SteadyClock clock;
   std::unique_ptr<hal::Display> display;
+  std::unique_ptr<hal::Display> realLcd;
+  std::unique_ptr<hal::Display> mirror;
   std::unique_ptr<hal::ButtonReader> buttonsHw;
   hal::Buzzer* buzzerHw = nullptr;
   std::unique_ptr<hal::Buzzer> simBuzzer;
@@ -232,6 +237,12 @@ int main(int argc, char** argv) {
 #if defined(WFW_HARDWARE)
     i2c = std::make_unique<hal::I2cBus>(cfg.i2cBus);
     display = std::make_unique<hal::GroveLcd>(*i2c, cfg.lcdAddress, cfg.backlightAddress);
+    if (opt.mirrorDisplay) {
+      LOG_WARN("--mirror-display: every LCD screen, recovery words included, is printed here");
+      realLcd = std::move(display);
+      mirror = std::make_unique<hal::SimDisplay>(clock, "", true);
+      display = std::make_unique<hal::MirrorDisplay>(*realLcd, *mirror);
+    }
     hal::GpiodIo::Pins pins{cfg.gpioChip,
                             {static_cast<unsigned>(cfg.gpioLeft), static_cast<unsigned>(cfg.gpioMiddle),
                              static_cast<unsigned>(cfg.gpioRight)},

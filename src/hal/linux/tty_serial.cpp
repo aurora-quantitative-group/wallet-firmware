@@ -168,21 +168,34 @@ bool TcpListenLink::open() {
     hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
     addrinfo* res = nullptr;
     const std::string port = std::to_string(port_);
-    if (::getaddrinfo(host_.c_str(), port.c_str(), &hints, &res) != 0 || res == nullptr) {
+    // "Any address" listens dual-stack on "::", so clients that resolve the
+    // Pi to an IPv6 link-local address (Windows mDNS) reach it as well.
+    const bool any = host_ == "0.0.0.0" || host_ == "::" || host_ == "*";
+    const char* host = any ? "::" : host_.c_str();
+    if (::getaddrinfo(host, port.c_str(), &hints, &res) != 0 || res == nullptr) {
       LOG_ERROR("tcp: cannot resolve %s", host_.c_str());
       return false;
     }
     const int fd = ::socket(res->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     const int one = 1;
+    const int zero = 0;
     if (fd >= 0) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if (fd >= 0 && res->ai_family == AF_INET6) {
+      ::setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof(zero));
+    }
     if (fd < 0 || ::bind(fd, res->ai_addr, res->ai_addrlen) != 0 || ::listen(fd, 1) != 0) {
-      LOG_ERROR("tcp: cannot listen on %s: %s", describe().c_str(), std::strerror(errno));
+      if (!listenFailing_) {  // say it once, then retry quietly every 2 s
+        LOG_ERROR("tcp: cannot listen on %s: %s (is another wallet-fw running?)",
+                  describe().c_str(), std::strerror(errno));
+      }
+      listenFailing_ = true;
       if (fd >= 0) ::close(fd);
       ::freeaddrinfo(res);
       return false;
     }
     ::freeaddrinfo(res);
     listenFd_ = fd;
+    listenFailing_ = false;
     LOG_WARN("DEVELOPMENT transport listening on %s (approvals still need the buttons)",
              describe().c_str());
   }

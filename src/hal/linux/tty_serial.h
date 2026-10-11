@@ -76,12 +76,13 @@ class TcpListenLink final : public SerialLink {
   ~TcpListenLink() override;
   bool open() override;  // accepts a waiting client, if any
   std::string describe() const override { return "tcp://" + host_ + ":" + std::to_string(port_); }
-  int retryMs() const override { return 100; }
+  int retryMs() const override { return listenFailing_ ? 2000 : 100; }
 
  private:
   std::string host_;
   int port_;
   int listenFd_ = -1;
+  bool listenFailing_ = false;
 };
 
 }  // namespace wfw::hal
