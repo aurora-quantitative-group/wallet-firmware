@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <csignal>
@@ -52,6 +53,7 @@ struct Options {
   bool wipe = false;
   bool hwTest = false;
   bool mirrorDisplay = false;
+  std::string keyControl;
   std::string tcpListen;
 };
 
@@ -66,6 +68,7 @@ void usage() {
       "  --hw-test              LCD pages / buttons / buzzer check (stop the service first)\n"
       "  --tcp-listen HOST:PORT DEVELOPMENT ONLY: serve the protocol over TCP, not serial\n"
       "  --mirror-display       also print every LCD screen here (shows recovery words!)\n"
+      "  --key-control FIFO     DEVELOPMENT ONLY: also accept l/m/r/h presses written to FIFO\n"
       "  --version              print the firmware version\n"
       "Simulator (no Pi hardware needed):\n"
       "  --sim                  console LCD, typed button commands, PTY serial port\n"
@@ -98,6 +101,7 @@ bool parseArgs(int argc, char** argv, Options& o) {
     else if (a == "--wipe") o.wipe = true;
     else if (a == "--hw-test") o.hwTest = true;
     else if (a == "--mirror-display") o.mirrorDisplay = true;
+    else if (a == "--key-control") ok = value(o.keyControl);
     else if (a == "--tcp-listen") ok = value(o.tcpListen);
     else if (a == "--version") {
       std::cout << "Aurora firmware (wallet-fw) " << WFW_VERSION << " (protocol " << device::kProtocolVersion << ")\n";
@@ -206,6 +210,7 @@ int main(int argc, char** argv) {
   hal::Buzzer* buzzerHw = nullptr;
   std::unique_ptr<hal::Buzzer> simBuzzer;
   hal::SimButtons* simButtons = nullptr;
+  std::unique_ptr<hal::SimButtons> keyButtons;  // --key-control, added to the real buttons
   std::unique_ptr<hal::SerialLink> link;
 #if defined(WFW_HARDWARE)
   std::unique_ptr<hal::I2cBus> i2c;
@@ -256,6 +261,20 @@ int main(int argc, char** argv) {
     buzzerHw = gpio.get();
     buttonsHw = std::move(gpio);
     link = std::make_unique<hal::TtySerial>(cfg.serialDevice, cfg.serialBaud);
+    if (!opt.keyControl.empty()) {
+      // A FIFO anyone on the Pi may write (0622): whoever can write it can
+      // press "hold right", so this is for development with a broken screen.
+      ::mkfifo(opt.keyControl.c_str(), 0622);
+      ::chmod(opt.keyControl.c_str(), 0622);
+      const int fd = ::open(opt.keyControl.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
+      if (fd < 0) {
+        LOG_ERROR("cannot open %s: %s", opt.keyControl.c_str(), std::strerror(errno));
+        return 1;
+      }
+      LOG_WARN("DEVELOPMENT: button presses also accepted from %s", opt.keyControl.c_str());
+      keyButtons = std::make_unique<hal::SimButtons>(clock, fd);
+      simButtons = keyButtons.get();
+    }
 #else
     return 1;  // rejected above
 #endif
@@ -357,6 +376,10 @@ int main(int argc, char** argv) {
 
     std::array<bool, 3> raw{};
     if (buttonsHw->read(raw)) {
+      std::array<bool, 3> typed{};
+      if (keyButtons && keyButtons->read(typed)) {
+        for (size_t i = 0; i < raw.size(); ++i) raw[i] = raw[i] || typed[i];
+      }
       events.clear();
       buttons.update(raw, clock.nowMs(), events);
       for (const auto& ev : events) controller.onButton(ev);
