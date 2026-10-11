@@ -48,7 +48,7 @@ std::string Controller::humanError(const std::string& code) {
       {err::kBackupAlreadyConfirmed,
        "Your backup is confirmed. For your security, Aurora never shows the recovery phrase "
        "again."},
-      {err::kPinLocked, "Too many wrong PINs. Aurora stays locked; recover with your 12 words."},
+      {err::kPinLocked, "Too many wrong passwords. Recover the funds with your 12 words, then erase Aurora."},
       {err::kSecureChannelRequired, "Aurora requires an encrypted session first."},
       {err::kNoSecureChannel, "No encrypted session with Aurora."},
       {err::kDecryptFailed, "Aurora could not decrypt the request."},

@@ -124,8 +124,8 @@ The app adds the signature, verifies it, and broadcasts.
   prompting.
 
 The password crosses the cable in plaintext unless the encrypted channel is
-running. It is never stored on the PC; forgetting it means erasing Aurora and
-restoring from the 12 words.
+running. It is never stored on the PC. If it is forgotten, the 12 words recover the
+funds in any BIP-39 wallet, and erasing Aurora starts over.
 
 ### `balances {wallets}`, `reset {}`
 
