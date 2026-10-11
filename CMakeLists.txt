@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(wallet_fw VERSION 0.2.0 LANGUAGES C CXX)
+project(wallet_fw VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -68,7 +68,8 @@ add_library(wfw_core STATIC
   src/device/controller.cpp
   src/device/controller_commands.cpp
   src/device/controller_setup.cpp
-  src/device/controller_sign.cpp)
+  src/device/controller_sign.cpp
+  src/device/controller_menu.cpp)
 target_include_directories(wfw_core PUBLIC src)
 target_link_libraries(wfw_core PUBLIC PkgConfig::SODIUM PkgConfig::SECP256K1 trezor_crypto
   nlohmann_json::nlohmann_json)
@@ -120,7 +121,8 @@ if(WFW_BUILD_TESTS)
     tests/unit/test_controller_sign.cpp
     tests/unit/test_controller_secure.cpp
     tests/unit/test_controller_review.cpp
-    tests/unit/test_protocol_v2.cpp)
+    tests/unit/test_protocol_v2.cpp
+    tests/unit/test_device_menu.cpp)
   target_link_libraries(wfw_tests PRIVATE wfw_core)
   target_compile_definitions(wfw_tests PRIVATE
     WFW_TEST_VECTORS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/third_party/vectors")

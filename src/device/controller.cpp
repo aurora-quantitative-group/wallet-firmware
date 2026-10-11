@@ -86,6 +86,10 @@ void Controller::dispatch(const json& req, bool encrypted) {
   const json& params = p == req.end() ? kNoParams : *p;
   LOG_DEBUG("request: %s%s", name.c_str(), encrypted ? " (encrypted)" : "");
 
+  if (appDisconnected_) {  // the person chose DISCONNECT APP on the device
+    replyError(ctx, err::kAppDisconnected, "reconnect from Aurora's menu");
+    return;
+  }
   if (s_.config.requireSecureChannel && !encrypted && name != cmd::kPing &&
       name != cmd::kGetPubkey && name != cmd::kHandshake) {
     replyError(ctx, err::kSecureChannelRequired, "complete the handshake first");
@@ -105,6 +109,10 @@ void Controller::dispatch(const json& req, bool encrypted) {
     handleSignTx(ctx, params);
   } else if (name == cmd::kCancel) {
     handleCancel(ctx);
+  } else if (name == cmd::kReset) {
+    handleReset(ctx);
+  } else if (name == cmd::kBalances) {
+    handleBalances(ctx, params);
   } else if (name == cmd::kHandshake) {
     handleHandshake(ctx, params);
   } else {
@@ -211,10 +219,15 @@ void Controller::onButton(const ui::ButtonEvent& ev) {
     case Mode::Pair: onPairButton(ev); break;
     case Mode::Pin: onPinButton(ev); break;
     case Mode::Review: onReviewButton(ev); break;
+    case Mode::Menu: onMenuButton(ev); break;
+    case Mode::Browse: onBrowseButton(ev); break;
+    case Mode::Erase: onEraseButton(ev); break;
     case Mode::Notice:
       if (ev.kind == ui::ButtonEvent::Kind::Press && !sessionActive()) showIdle();
       break;
-    case Mode::Idle: break;
+    case Mode::Idle:  // middle opens the device menu
+      if (ev.kind == ui::ButtonEvent::Kind::Press && ev.button == ui::Button::Middle) openMenu();
+      break;
   }
   render();
 }
@@ -230,6 +243,12 @@ void Controller::tick() {
     showNotice("TIMED OUT", "", ui::colors::kIdle);
   }
   if (mode_ == Mode::Notice && now >= noticeUntil_) showIdle();
+  // Menus close on their own; a device-started erase is abandoned.
+  if ((mode_ == Mode::Menu || mode_ == Mode::Browse ||
+       (mode_ == Mode::Erase && !sessionActive())) &&
+      now - menuActivity_ >= 60000) {
+    showIdle();
+  }
   if (!hint_.empty() && now >= hintUntil_) hint_.clear();
   // Auto-lock: a PIN-protected wallet does not stay unlocked while unattended.
   auto& ks = s_.keystore;
@@ -290,6 +309,7 @@ void Controller::render() {
   ui::Screen out = base_;
   const bool holdMode =
       mode_ == Mode::Review || mode_ == Mode::Quiz || mode_ == Mode::Pair ||
+      mode_ == Mode::Erase || mode_ == Mode::Menu ||
       (mode_ == Mode::Words && wordIndex_ == static_cast<int>(crypto::kMnemonicWords) - 1);
   if (!hint_.empty()) {
     out.bottom = hint_;
@@ -303,13 +323,13 @@ void Controller::render() {
   // Only what actually reached the LCD counts. While the display is failing,
   // nothing is "seen" and no confirming hold can be in progress.
   if (!s_.screen.healthy()) {
-    if (mode_ == Mode::Review) {
+    if (mode_ == Mode::Review || mode_ == Mode::Erase) {
       std::fill(seen_.begin(), seen_.end(), false);
       sessionStart_ = s_.clock.nowMs();
     } else if (mode_ == Mode::Words) {
       lastWordShownAt_ = s_.clock.nowMs();
     }
-  } else if (mode_ == Mode::Review && pageIndex_ < seen_.size()) {
+  } else if ((mode_ == Mode::Review || mode_ == Mode::Erase) && pageIndex_ < seen_.size()) {
     seen_[pageIndex_] = true;
   }
 }

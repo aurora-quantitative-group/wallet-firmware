@@ -53,6 +53,8 @@ std::string Controller::humanError(const std::string& code) {
       {err::kNoSecureChannel, "No encrypted session with Aurora."},
       {err::kDecryptFailed, "Aurora could not decrypt the request."},
       {err::kHandshakeFailed, "Aurora could not start an encrypted session."},
+      {err::kAppDisconnected,
+       "Aurora is disconnected from apps. On Aurora, open the menu and choose CONNECT APP."},
   };
   const auto it = kText.find(code);
   return it == kText.end() ? "Aurora reported an internal error." : it->second;

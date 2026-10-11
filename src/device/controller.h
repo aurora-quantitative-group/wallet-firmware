@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -64,8 +65,8 @@ class Controller {
     json id;
     bool encrypted = false;
   };
-  enum class Pending { None, Setup, ShowSeed, Sign, Pair };
-  enum class Mode { Idle, Notice, Words, Quiz, Pin, Review, Pair };
+  enum class Pending { None, Setup, ShowSeed, Sign, Pair, Erase };
+  enum class Mode { Idle, Notice, Words, Quiz, Pin, Review, Pair, Menu, Browse, Erase };
   enum class PinPurpose { Set, Confirm, Unlock };
 
   struct Page {
@@ -117,6 +118,20 @@ class Controller {
   void requireUnlock(std::function<void()> then);
   void clearSecrets();
 
+  // controller_menu.cpp: on-device menu, wallet list, erase, app kill switch.
+  void handleReset(const Ctx& ctx);
+  void handleBalances(const Ctx& ctx, const json& params);
+  std::vector<std::string> menuItems() const;
+  void openMenu();
+  void showMenu();
+  void onMenuButton(const ui::ButtonEvent& ev);
+  void showWalletPage();
+  void onBrowseButton(const ui::ButtonEvent& ev);
+  void setAppDisconnected(bool disconnected);
+  void startErase();
+  void onEraseButton(const ui::ButtonEvent& ev);
+  void eraseWallet();
+
   // controller_sign.cpp: sign_tx validation, review pages, approval.
   void handleSignTx(const Ctx& ctx, const json& params);
   void buildReviewPages(const solana::TxSummary& tx);
@@ -153,6 +168,17 @@ class Controller {
   std::array<int, kQuizChoices> quizChoices_{};      // BIP-39 wordlist indices
   int quizStep_ = 0;
   int quizChoice_ = 0;  // highlighted candidate
+
+  // Device menu and wallet list. Balances come from the app (informational).
+  struct Balance {
+    std::string amount;
+    std::string symbol;
+  };
+  std::map<std::string, Balance> balances_;
+  bool appDisconnected_ = false;  // kill switch from the device menu
+  size_t menuIndex_ = 0;
+  size_t browseIndex_ = 0;
+  TimeMs menuActivity_ = 0;
 
   // Pairing prompt.
   std::string pairChallenge_;
