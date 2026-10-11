@@ -54,7 +54,8 @@ Status key:
 | R35 | X25519 + HKDF-SHA256 + ChaCha20-Poly1305; ed25519 signs the handshake (S12) | `crypto/secure_channel.cpp`, `handshake` cmd | RFC 5869 vectors, `channel_*` tests, integration test 4 (Python client) | Verified (opt-in) |
 | R36 | Demo config: disable Wi-Fi and BT (S12) | `setup-pi.sh lockdown` | `bash -n` | Impl |
 | R37 | Solana Pay: reference key as an extra read-only account; the Pi shows amount and recipient (S13) | Transfer recogniser allows extra accounts | `parse_solana_pay_reference_transfer` (web3.js vector) | Verified |
-| R38 | Show the user's words again ("back"), verify the typed phrase (TLDR + S8) | `show_words`, `confirm_backup` | `ctrl_backup_reshow_and_confirm`, integration test 1 | Verified |
+| R38 | Verify the backup without the phrase leaving the device (Aurora mission §12A) | 3-word on-device check in `setup` / `show_seed`; `confirm_backup` removed | `ctrl_backup_is_checked_on_the_device`, `ctrl_show_seed_finishes_an_unchecked_backup`, integration test 1 (deliberate wrong answer) | Verified |
+| R39 | Aurora app compatibility: protocol v2 envelope, signed identity, wallet manifest (SOL + BTC), pairing | `controller_commands.cpp`, `storage/identity.cpp`, `crypto/bitcoin.cpp` | `test_protocol_v2.cpp`; app's Rust `authenticates_with_real_firmware_when_available` (Windows → firmware over TCP); app's `tests/firmware.test.ts` (setup, pair, sign) | Verified (sim) |
 
 ## Added for safety and robustness
 
@@ -81,6 +82,18 @@ Status key:
 | `node tests/tools/gen_vectors.js`, diffed against `test_vectors.h` | Identical |
 | Devnet `simulateTransaction` with `sigVerify: true` on a firmware-signed transfer | Signature accepted (`AccountNotFound`, unfunded); bit-flipped control: `SignatureFailure` |
 | `bash -n scripts/setup-pi.sh`; `systemd-analyze verify deploy/wallet-fw.service` | OK |
+
+## Aurora integration evidence (2026-10-10)
+
+| Check | Result |
+|---|---|
+| Firmware unit tests (`wfw_tests`) | 86 tests, 0 failed; clean under ASan/UBSan |
+| Firmware simulator end-to-end (`tests/integration/test_sim.py`, PTY + TCP) | 7 tests OK |
+| App Rust tests on Windows (`cargo test --locked`) | 6 passed, including a live identity check of the firmware simulator over TCP (WSL → Windows) |
+| App frontend tests (`npm test`, Windows) | 13 passed, 1 skipped (needs the simulator's button FIFO) |
+| App ↔ firmware full flow (`tests/firmware.test.ts`, WSL) | Setup with the on-device check, signed pairing, web3.js transfer signed by the firmware, `verifySignatures()` true |
+| App UI tests (`npm run test:ui`, Windows) | 15 passed, 2 failed. Both failures are clipboard checks that also fail on unmodified `main` in this environment. |
+| App release build (`cargo build --release`) | OK |
 
 ## Independent review
 
@@ -110,7 +123,7 @@ Accepted, not fixed (documented in architecture.md):
 
 These need the real Pi and parts. Run them in this order on the Pi:
 
-1. `i2cdetect -y 1` shows 0x3e and 0x62 (or 0x30). On boot the LCD shows "SOLPI WALLET".
+1. `i2cdetect -y 1` shows 0x3e and 0x62 (or 0x30). On boot the LCD shows "AURORA / SET UP IN APP".
 2. Each button press shows up in `journalctl -u wallet-fw` with `--verbose`.
    Check that bounce doesn't double-step the word screens.
 3. The buzzer beeps on `wallet_cli.py send`.
@@ -125,6 +138,6 @@ These need the real Pi and parts. Run them in this order on the Pi:
 |---|---|---|
 | App team | Implement the protocol in `protocol-contract.md` (Rust `serialport` + JSON lines) | Integration |
 | App team | Send `serializeMessage()` bytes, not the full transaction | `sign_tx` expects message bytes |
-| App team | Use `confirm_backup` / `show_words` for the Step 8 "type it back" / "back" flow | Otherwise the backup is never confirmed (signing still works) |
+| App team | Done on branch `firmware-integration` of wallet-software: protocol 2, device-side setup and code pairing | Merge and publish |
 | Backend | Optional `reason` (≤ 16 chars) alongside `risk` | Shown on the device risk page |
 | Team | Fund the device address at faucet.solana.com | R23 on-chain confirmation |
