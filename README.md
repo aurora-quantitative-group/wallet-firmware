@@ -72,6 +72,35 @@ journalctl -u wallet-fw -f     # live log
 For the demo only, `sudo scripts/setup-pi.sh lockdown` adds `disable-wifi` and
 `disable-bt` (Step 12). This removes SSH over Wi-Fi.
 
+### Automatic updates from GitHub
+
+Once, on the Pi (it needs internet, e.g. Windows Internet Connection Sharing):
+
+```sh
+cd ~/wallet-firmware && git pull
+sudo scripts/install-updater.sh          # shows a deploy key to add on GitHub
+# or: sudo scripts/install-updater.sh --token   (a read-only fine-grained token)
+```
+
+From then on the Pi checks the `firmware` branch every 15 minutes. When there
+is a new commit it:
+
+1. builds it and runs the unit tests (at low priority);
+2. installs it and restarts `wallet-fw`, which interrupts any prompt on the
+   device and locks a password wallet;
+3. puts the previous binary back if the service won't stay running.
+
+A commit that fails to build or test is skipped until a newer one arrives. If
+the branch history is rewritten, nothing is installed. Watch it with
+`journalctl -u aurora-update -f`, or check now with
+`sudo systemctl start aurora-update`.
+
+**Trust:** whoever can push to `firmware` can change what runs on Aurora,
+including code that sees the password and keys. To accept only signed
+commits, put the signers' SSH keys in `/etc/aurora-update/allowed_signers`
+(`git` allowed-signers format). Turn updates off with
+`sudo systemctl disable --now aurora-update.timer`.
+
 ### Manual build
 
 ```sh

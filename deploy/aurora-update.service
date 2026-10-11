@@ -1,0 +1,17 @@
+[Unit]
+Description=Aurora firmware update from GitHub
+Documentation=file:///usr/local/share/doc/wallet-fw/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aurora-update
+StateDirectory=aurora-update
+StateDirectoryMode=0700
+UMask=0022
+# Building must never slow down the wallet itself.
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=20
+TimeoutStartSec=60min

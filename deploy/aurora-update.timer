@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for Aurora firmware updates every 15 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=1min
+
+[Install]
+WantedBy=timers.target
