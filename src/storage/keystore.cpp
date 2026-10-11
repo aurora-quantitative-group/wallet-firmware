@@ -1,6 +1,7 @@
 #include "storage/keystore.h"
 
 #include <sodium.h>
+#include <algorithm>
 
 #include <nlohmann/json.hpp>
 
@@ -83,6 +84,13 @@ bool Keystore::load(std::string& err) {
     if (!pub) return fail("keystore public key is invalid");
     backupConfirmed_ = doc.value("backup_confirmed", false);
     pinFailures_ = doc.value("pin_failures", 0);
+    for (const auto* field : {"next_sol", "next_btc"}) {
+      if (doc.contains(field) && (!doc[field].is_number_unsigned() ||
+          doc[field].get<uint64_t>() < 1 || doc[field].get<uint64_t>() > crypto::kHardened))
+        return fail("invalid receive counter");
+    }
+    nextSol_ = doc.value("next_sol", uint32_t{1});
+    nextBtc_ = doc.value("next_btc", uint32_t{1});
     bitcoinAddress_ = doc.value("btc_address", "");
     const json& secret = doc.at("secret");
     const std::string scheme = secret.at("scheme").get<std::string>();
@@ -150,6 +158,8 @@ bool Keystore::persist(std::string& err) {
               {"pubkey", address()},
               {"backup_confirmed", backupConfirmed_},
               {"pin_failures", pinFailures_},
+              {"next_sol", nextSol_},
+              {"next_btc", nextBtc_},
               {"btc_address", bitcoinAddress_},
               {"secret", secret}};
   std::string text = doc.dump(2) + "\n";
@@ -165,6 +175,7 @@ bool Keystore::create(const uint8_t entropy[crypto::kEntropyBytes], const std::s
     return false;
   }
   status_ = Status::Empty;
+  nextSol_ = nextBtc_ = 1;
   bitcoinAddress_.clear();
   if (!adoptEntropy(entropy, err)) return false;
   backupConfirmed_ = backupConfirmed;
@@ -270,11 +281,49 @@ bool Keystore::wipe(std::string& err) {
   bitcoinAddress_.clear();
   backupConfirmed_ = false;
   pinFailures_ = 0;
+  nextSol_ = nextBtc_ = 1;
   pinProtected_ = false;
   salt_.clear();
   nonce_.clear();
   ciphertext_.clear();
   status_ = Status::Empty;
+  return true;
+}
+
+bool Keystore::solanaKey(uint32_t index, crypto::KeyPair& out) const {
+  if (!ready() || index >= nextSol_ || index >= crypto::kHardened) return false;
+  crypto::Mnemonic words;
+  if (!mnemonic(words)) return false;
+  crypto::Secret<crypto::kBip39SeedBytes> seed;
+  crypto::mnemonicToSeed(words, "", seed);
+  crypto::Slip10Node node;
+  const std::vector<uint32_t> path = {44 | crypto::kHardened, 501 | crypto::kHardened,
+                                    crypto::kHardened, index | crypto::kHardened};
+  if (!crypto::slip10Derive(seed.data(), seed.size(), path, node)) return false;
+  crypto::keyPairFromSeed(node.key.data(), out);
+  return true;
+}
+
+bool Keystore::allocateReceive(const std::string& chain, uint32_t minimum, uint32_t& index,
+                              std::string& address, std::string& err) {
+  if (!ready()) { err = "wallet is locked"; return false; }
+  if (chain != "BTC" && chain != "SOL") { err = "unsupported chain"; return false; }
+  uint32_t& counter = chain == "BTC" ? nextBtc_ : nextSol_;
+  index = std::max(counter, minimum);
+  if (index >= crypto::kHardened) { err = "receive indices exhausted"; return false; }
+  counter = index + 1;
+  if (!persist(err)) return false;
+  if (chain == "SOL") {
+    crypto::KeyPair pair;
+    if (!solanaKey(index, pair)) { err = "Solana derivation failed"; return false; }
+    address = base58Encode(pair.publicKey);
+    return true;
+  }
+  crypto::Mnemonic words;
+  if (!mnemonic(words) || !crypto::bip84Address(words, 0, address, index)) {
+    err = "Bitcoin derivation failed";
+    return false;
+  }
   return true;
 }
 

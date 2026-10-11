@@ -5,6 +5,7 @@
 
 #include "device/controller.h"
 #include "device/protocol.h"
+#include "solana/format.h"
 #include "util/log.h"
 
 namespace wfw::device {
@@ -104,7 +105,40 @@ void Controller::handlePing(const Ctx& ctx, const json& params) {
                             {"pin_protected", ks.pinProtected()},
                             {"busy", sessionActive()},
                             {"display_ok", s_.screen.healthy()},
-                            {"secure_channel", channel_.active()}}));
+                            {"secure_channel", channel_.active()},
+                            {"receive_addresses", true}}));
+}
+
+void Controller::handleReceiveAddress(const Ctx& ctx, const json& params) {
+  if (!checkReadyForPrompt(ctx)) return;
+  auto& ks = s_.keystore;
+  if (!ks.ready()) { replyError(ctx, err::kLocked); return; }
+  const auto nonce = params.find("challenge");
+  const auto wallet = params.find("wallet_id");
+  const auto minimum = params.find("minimum_index");
+  if (nonce == params.end() || !validChallenge(*nonce) || wallet == params.end() ||
+      !wallet->is_string() || minimum == params.end() || !minimum->is_number_unsigned() ||
+      minimum->get<uint64_t>() < 1 || minimum->get<uint64_t>() >= crypto::kHardened) {
+    replyError(ctx, err::kInvalidRequest);
+    return;
+  }
+  json selected;
+  for (const auto& item : walletManifest()) if (item["id"] == *wallet) selected = item;
+  if (selected.is_null()) { replyError(ctx, err::kWrongWallet); return; }
+  const std::string chain = selected["chain"];
+  uint32_t index = 0;
+  std::string address, why;
+  if (!ks.allocateReceive(chain, minimum->get<uint32_t>(), index, address, why)) {
+    replyError(ctx, err::kStorageError, why);
+    return;
+  }
+  const std::string path = chain == "BTC" ? "m/84'/0'/0'/0/" + std::to_string(index)
+                                         : "m/44'/501'/0'/" + std::to_string(index) + "'";
+  reply(ctx, signedPayload({{"challenge", *nonce}, {"device_id", s_.identity.deviceId()},
+      {"wallet_id", *wallet}, {"root_address", selected["address"]}, {"chain", chain},
+      {"network", selected["network"]}, {"account", 0}, {"index", index},
+      {"path", path}, {"address", address}}));
+  showNotice("RECEIVE " + chain, abbreviateAddress(address), ui::colors::kIdle);
 }
 
 void Controller::handleGetPubkey(const Ctx& ctx) {
