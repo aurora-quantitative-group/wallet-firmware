@@ -1,226 +1,135 @@
-# wallet-fw serial protocol (v1)
+# Aurora serial protocol (v2)
 
-This is the contract between the device firmware and the desktop app (Svelte +
-Tauri). The firmware implements it in `src/device/`; `tools/wfw_host.py` is a
-working host-side reference in about 250 lines of Python.
+This is the contract between the Aurora firmware and the Aurora desktop app
+(Svelte + Tauri,
+[wallet-software](https://github.com/blockchain-wallet-hackathon/wallet-software),
+`src-tauri/src/device.rs`). The firmware implements it in `src/device/`. The
+app repository keeps a matching summary in `docs/protocol.md`.
+`tools/wfw_host.py` is a working host-side reference in Python.
 
 ## Transport
 
 | | |
 |---|---|
-| Link | USB-C gadget serial. On the laptop it is a normal serial port (`COMx` / `/dev/tty.usbmodem*` / `/dev/ttyACM*`). Fallback: Pico debugprobe UART bridge. |
-| Settings | 115200 8N1, no flow control (the baud rate is ignored by the USB gadget) |
-| Framing | One JSON object per line, UTF-8, terminated by `\n` (`\r\n` accepted). Max 8192 bytes per line. |
-| Model | Strict request → reply. Send one request, read lines until the reply with the same `id` arrives. The device never sends unsolicited messages. |
-
-Every request:
+| Link | USB-C gadget serial; on the laptop it's a normal serial port (`COMx` / `/dev/tty.usbmodem*` / `/dev/ttyACM*`). Fallback: Pico debugprobe UART bridge. **Development only:** `wallet-fw --tcp-listen host:port`, which the app's debug build reaches through `WALLET_SERIAL_PORT=tcp://host:port`. |
+| Settings | 115200 8N1, no flow control |
+| Framing | One JSON object per line, UTF-8, `\n`-terminated (`\r\n` is accepted). Max 8192 bytes per request; replies stay under 64 KiB. |
+| Model | Strict request → reply, matched by `id`. Aurora never sends unsolicited messages. |
 
 ```json
-{"id": 42, "cmd": "<command>", ...params}
+{"id": "r1", "command": "<name>", "params": {...}}
+{"id": "r1", "result": {...}}
+{"id": "r1", "error": "Rejected on Aurora.", "code": "rejected", "detail": "...", "risk": "high"}
 ```
 
-`id` is optional (string or number) and echoed back unchanged. Always send one.
+- `id` is a string or number, echoed back.
+- `params` is optional and must be an object.
+- `error` is text to show the user. `code` is stable and meant for programs. `detail` is a developer hint. `sign_tx` rejections also carry `risk` and `reason`.
+- An error that can't be tied to a request (bad JSON, a line that's too long, a bad encrypted frame) has `"id": null`.
 
-Every reply has `ok`. On failure it also has `error` (a stable code from the
-table below) and usually a human-readable `message`:
-
-```json
-{"id": 42, "ok": false, "error": "not_initialized", "message": "run setup"}
-```
-
-A reply with `"id": null` and `ok: false` is an error the device could not
-tie to a request (bad JSON, line too long, bad encrypted frame). Treat it
-as the answer to your outstanding request.
-
-### Commands that wait for the user
-
-`setup`, `show_words` and `sign_tx` (and `handshake` when a PIN must be
-entered) do not reply until the person acts on the device. Wait at least as
-long as the device timeout: 180 s for `sign_tx`, 900 s for `setup` and
-`show_words`. Meanwhile the device still answers `ping`, `get_pubkey`,
-`confirm_backup` and `cancel`. Another prompting command gets `busy`.
+`setup`, `show_seed`, `pair` and `sign_tx` wait for the person at the device.
+Meanwhile Aurora still answers `ping`, `get_pubkey` and `cancel`; another
+prompt gets `busy`.
 
 ## Commands
 
-### `ping`
+### `ping {challenge}`: signed identity
+
+Aurora creates a persistent Ed25519 **identity key** on first boot, stored in
+`identity.key` and separate from the wallet seed. `device_id` is its base58
+public key. The result is `{"payload": "<JSON string>", "signature": "<base64>"}`,
+signed over the exact payload bytes.
 
 ```json
-→ {"id":1,"cmd":"ping"}
-← {"id":1,"ok":true,"pong":true,"version":"0.1.0","protocol":1,
-   "initialized":true,"state":"ready","name":"SolPi-HAgk",
-   "busy":false,"display_ok":true,"secure_channel":false}
+{"challenge":"…","device_id":"BpdE…","name":"Aurora BpdE","has_seed":true,"protocol":2,
+ "firmware":"0.2.0","state":"ready","backup_confirmed":true,"pin_protected":false,
+ "busy":false,"display_ok":true,"secure_channel":false,
+ "wallets":[{"id":"sol-0","name":"Solana wallet","chain":"SOL","network":"mainnet","account":0,"address":"HAgk…"},
+            {"id":"sol-dev","name":"Devnet wallet","chain":"SOL","network":"devnet","account":0,"address":"HAgk…"},
+            {"id":"btc-0","name":"Bitcoin wallet","chain":"BTC","network":"mainnet","account":0,"address":"bc1q…"}]}
 ```
 
-`state` is one of:
+- **Challenge:** 8–128 characters.
+- **`state`:** `uninitialized`, `ready`, `locked` (PIN on the device) or `error`.
+- **Wallets:** SOL comes from SLIP-0010 `m/44'/501'/0'/0'`, the same address on both clusters; only devnet signs. BTC is the BIP-84 `m/84'/0'/0'/0/0` P2WPKH address, for tracking only. It's stored at setup so it's known while locked. Before setup, `wallets` is `[]`.
 
-| `state` | Meaning |
+### `setup {}`: new wallet, backup checked on the device
+
+1. Aurora draws 128 bits from libsodium and shows the 12 BIP-39 words one per screen (`03/12 ocean`). Middle shows the next word and left goes back. Holding right on word 12 finishes.
+2. **Backup check:** Aurora asks for 3 random positions (`WORD #07? M:NEXT`). For each, the user picks the right word from 4 candidates (middle and left cycle, hold right chooses).
+3. A wrong answer goes back to the words. Nothing is saved until all 3 are right.
+4. With `pin_enabled`, the user then sets a PIN on the device.
+5. The wallet is saved, and the result is `{"created":true,"shown":true,"has_seed":true,"backup_confirmed":true,"pubkey":"…","pin_protected":…}`.
+
+The phrase never crosses the serial link. An existing wallet is never replaced
+(`already_initialized`).
+
+### `show_seed {}`
+
+This re-shows the words of a wallet whose backup was never checked, then runs
+the same check. The result is `{"shown":true,"backup_confirmed":true}`. Once
+the backup is confirmed, Aurora refuses (`backup_already_confirmed`).
+
+### `pair {challenge, code}`
+
+`code` is 4–6 digits and the app shows it.
+
+1. Aurora shows `PAIR CODE 4821` / `HOLD R  L:REJECT`. If PIN-locked, it asks for the PIN first.
+2. Holding right returns a signed `{"challenge","code","device_id","paired":true}` payload, like `ping`. Left returns `rejected`.
+
+The app verifies the signature, the challenge and the code before saving the
+link.
+
+### `sign_tx {address, message, risk?, reason?}`
+
+| Param | Notes |
 |---|---|
-| `uninitialized` | No wallet yet: run setup. |
-| `ready` | Wallet present and unlocked. |
-| `locked` | Wallet is PIN-protected and locked; the device asks for the PIN when needed. |
-| `error` | The keystore is unreadable. Show the user an error. |
+| `message` | Base64 of `transaction.serializeMessage()`: the legacy or v0 **message**, ≤ 1232 bytes. |
+| `address` | Must be this Aurora's Solana address, else `wrong_wallet`. |
+| `risk` | Optional: `low`, `medium` or `high`. It can only *raise* Aurora's verdict; when missing, Aurora's own rule decides. |
+| `reason` | Optional, ≤ 16 characters, shown on the risk page. |
 
-Use `ping` every 2 s to detect the device (build manual Step 8: "No device connected").
+What Aurora does:
+1. **Parses the message itself.** Bad bytes give `invalid_message`, and a message Aurora doesn't need to sign gives `not_signer`.
+2. **Recognises the instructions.** System transfer (Solana Pay reference accounts are allowed), ComputeBudget and Memo are known. Anything else is `UNKNOWN TX`: red, and unsignable unless `allow_blind_signing` is on.
+3. **Applies its own rule.**
+   - A recipient Aurora has never signed for is at least yellow.
+   - A never-seen recipient receiving more than 1 SOL (`risk_limit_lamports`), an unknown instruction, or a priority fee above 0.01 SOL is red.
+4. **Shows every part on a page,** with a green, yellow or red backlight: `SEND 0.50 SOL` / `TO 7xKX..gAsU`, then the full address, memo (`MEMO i/n`), fee, risk and hint pages.
+5. **Requires certain pages to be seen first.** Every summary page always; the risk page when yellow or red; the full address for a first-time recipient.
+6. **Signs only after a 2-second right-button hold,** which must start after the prompt appeared and while the LCD is working.
 
-### `get_pubkey`
+The result is `{"signature":"<base64, 64 bytes>","risk":"medium","reason":"NEW RECIPIENT"}`.
+The app adds the signature, verifies it, and broadcasts.
 
-```json
-→ {"id":2,"cmd":"get_pubkey"}
-← {"id":2,"ok":true,"pubkey":"HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
-   "name":"SolPi-HAgk","backup_confirmed":false,"pin_protected":false,"locked":false}
-```
+### `cancel {}` and `get_pubkey {}`
 
-Errors: `not_initialized` (go to onboarding), `storage_error`. The public key
-is the device ID.
-
-### `setup`
-
-Creates a new wallet: 128 random bits, a 12-word BIP-39 phrase, and the key at
-`m/44'/501'/0'/0'` (same address as Phantom for the same phrase). The words are
-only ever shown on the device screen: `01/12 ocean`, middle = next, left =
-back, hold right on word 12 = done. With `pin_enabled`, the user then sets
-a PIN on the device.
-
-```json
-→ {"id":3,"cmd":"setup"}
-… user writes the words down and holds the right button on 12/12 …
-← {"id":3,"ok":true,"pubkey":"…","backup_confirmed":false,"pin_protected":false}
-```
-
-The wallet is saved when this reply is sent. Errors: `already_initialized`,
-`busy`, `display_unavailable`, `cancelled`, `timeout`, `storage_error`.
-
-### `confirm_backup` (extension)
-
-Checks the phrase the user typed back in the app. The device compares it by
-deriving the address, so this works while PIN-locked. The device normalizes
-case and whitespace.
-
-```json
-→ {"id":4,"cmd":"confirm_backup","words":"ocean wing … about"}
-← {"id":4,"ok":true,"backup_confirmed":true}
-← {"id":4,"ok":false,"error":"phrase_mismatch","message":"the words do not match this device"}
-```
-
-On `phrase_mismatch`, let the user retry, or offer "Back", which sends
-`show_words`. After a success the words can never be shown again.
-
-### `show_words` (extension)
-
-Shows the 12 words on the device again (the "back" button in Step 8). Only
-allowed while `backup_confirmed` is false.
-
-```json
-→ {"id":5,"cmd":"show_words"}
-← {"id":5,"ok":true}                 // after the user holds right on word 12
-```
-
-Errors: `backup_already_confirmed`, `not_initialized`, `busy`, `cancelled`, `timeout`.
-
-### `sign_tx`
-
-```json
-→ {"id":6,"cmd":"sign_tx",
-   "message":"<base64 of transaction.serializeMessage()>",
-   "risk":"low", "reason":"Known payee"}
-← {"id":6,"ok":true,"signature":"<base64, 64 bytes>","risk":"medium","reason":"NEW RECIPIENT"}
-← {"id":6,"ok":false,"error":"rejected","risk":"high","reason":"NEW+OVER LIMIT"}
-```
-
-| Field | Notes |
-|---|---|
-| `message` | Required. The serialized **message** (not the transaction), legacy or v0, ≤ 1232 bytes. |
-| `risk` | `low` / `medium` / `high` from the Gemini risk check. If it is missing, `medium` is used (the Step 10 fallback). |
-| `reason` | Optional, shown on the device's risk page; keep it ≤ 16 characters. |
-
-What the device does:
-
-1. **Parses the message itself.** It does not trust the app's description.
-   Malformed bytes return `invalid_message` immediately. If the device's key
-   is not a required signer, it returns `not_signer`.
-2. **Recognises the instructions:** System `transfer` (extra read-only accounts
-   such as Solana Pay references are fine), ComputeBudget unit limit, price,
-   heap and data-size, and Memo v1/v2. Anything else is shown as `UNKNOWN TX`
-   and is red. By default it **can't be approved** (`allow_blind_signing: false`).
-   Treat the device as a SOL-transfer signer.
-3. **Applies its own risk rule.** The app's level can only be raised:
-   - a recipient it has never signed for is at least `medium`;
-   - a never-seen recipient receiving more than `risk_limit_lamports` (default 1 SOL) is `high`;
-   - an unknown instruction, or a priority fee above 0.01 SOL, is `high`.
-4. **Shows each part on its own page**, with green, yellow or red backlight. Line 1
-   is `SEND 0.50 SOL`, line 2 is `TO 7xKX..gAsU`. Middle scrolls through the full
-   address, memo, priority fee, the `RISK:` page and the hint page. It beeps on
-   every request and plays a long tone for `high`.
-5. **Signs only after a 2 s hold** of the right button that started after the
-   prompt appeared and while the LCD is working. Some pages must be viewed
-   first:
-   - every summary, memo and fee page;
-   - for yellow or red, the risk page;
-   - for a first-time recipient, the full address.
-
-   Left rejects. Memo text is always shown under a `MEMO i/n` label.
-
-The reply's `risk` and `reason` are what the device enforced, so log them as the
-Tiger Data `device_events` detail. After a signed transfer, the recipient is
-remembered and later sends to it can be green.
-
-Then, in the app (Step 6):
-
-```js
-const tx = new Transaction({ recentBlockhash, feePayer: devicePubkey })
-  .add(SystemProgram.transfer({ fromPubkey: devicePubkey, toPubkey, lamports }));
-const message = tx.serializeMessage();
-const reply = await device.request({ cmd: "sign_tx", message: message.toString("base64"), risk });
-tx.addSignature(devicePubkey, Buffer.from(reply.signature, "base64"));
-const sig = await connection.sendRawTransaction(tx.serialize());
-await connection.confirmTransaction(sig);
-```
-
-Errors: `rejected`, `invalid_request`, `invalid_message`, `not_signer`,
-`not_initialized`, `busy`, `display_unavailable`, `pin_locked`, `cancelled`, `timeout`.
-
-### `cancel` (extension)
-
-Aborts the prompt that is waiting on the device. The waiting request gets
-`cancelled` first, then:
-
-```json
-← {"id":7,"ok":true,"cancelled":true}     // false if nothing was pending
-```
+- **`cancel`** aborts the waiting prompt. The prompt's request gets `cancelled`, then `cancel` returns `{"cancelled": bool}`.
+- **`get_pubkey`** is an unsigned convenience lookup: `{"pubkey","device_id","name","backup_confirmed","pin_protected","locked"}`.
 
 ## Error codes
 
-| Code | Meaning |
+| `code` | `error` text (abridged) |
 |---|---|
-| `invalid_json` | The line was not one JSON object |
-| `invalid_request` | Missing or ill-typed field (`cmd`, `message`, `risk`, `words`, …) |
-| `unknown_cmd` | Unrecognised `cmd` |
-| `line_too_long` | Line over 8192 bytes; it was discarded |
-| `busy` | Another device prompt is open |
-| `not_initialized` / `already_initialized` | Wallet state is wrong for the command |
-| `storage_error` | Keystore unreadable or not writable |
-| `display_unavailable` | The LCD is not responding, so nothing can be shown and nothing is signed |
-| `invalid_message` | `message` is not a valid Solana message |
-| `not_signer` | The device key is not a required signer of `message` |
-| `rejected` | The user pressed reject |
-| `cancelled` / `timeout` | Prompt aborted by `cancel` / not answered in time |
-| `phrase_mismatch` | `confirm_backup` words are wrong |
-| `backup_already_confirmed` | `show_words` / `confirm_backup` after confirmation |
-| `pin_locked` | Too many wrong PINs (the counter survives restarts). The device can't unlock this wallet any more: recover the funds by importing the 12 words into another wallet (e.g. Phantom), then `wallet-fw --wipe` and run `setup` for a new one. |
-| `secure_channel_required` | `require_secure_channel` is on and the request was not encrypted |
-| `no_secure_channel` / `decrypt_failed` / `handshake_failed` | Encrypted-channel errors |
-| `internal_error` | Bug or resource failure; check `journalctl -u wallet-fw` |
+| `invalid_json`, `invalid_request`, `unknown_cmd`, `line_too_long` | Aurora received a malformed / unsupported request |
+| `busy` | Aurora is waiting for you on its screen |
+| `not_initialized` / `already_initialized` | No wallet yet / a wallet exists and is never replaced |
+| `backup_already_confirmed` | The phrase is never shown again |
+| `storage_error`, `internal_error` | Device-side failure (see `journalctl -u wallet-fw`) |
+| `display_unavailable` | The screen isn't responding, so nothing can be confirmed |
+| `invalid_message`, `not_signer`, `wrong_wallet` | Transaction problems |
+| `rejected`, `cancelled`, `timeout` | The user said no, the app cancelled, or no answer in time |
+| `pin_locked` | Too many wrong PINs. The counter survives restarts; recover the funds with the 12 words in any BIP-39 wallet. |
+| `secure_channel_required`, `no_secure_channel`, `decrypt_failed`, `handshake_failed` | Encrypted-channel errors |
 
-## Onboarding sequence (Step 8)
+## Onboarding sequence (app)
 
 ```
-loop every 2 s: ping
+every 2 s: ping (signed)  -> verify signature, challenge, protocol == 2
   no reply / no port      -> "No device connected"
-  state = uninitialized   -> setup ............ show "write down the words on the device"
-                             reply.pubkey ...... ask the user to type the 12 words
-                             confirm_backup .... phrase_mismatch -> retry, or "Back" -> show_words
-                             ok -> homepage
-  state = ready | locked  -> get_pubkey -> homepage (name, address, balance, history)
+  has_seed = false        -> setup ............ "write the words down on Aurora, then confirm 3 on it"
+  has_seed, not paired    -> pair (code shown in the app and on Aurora) -> save link -> dashboard
+  paired link matches     -> dashboard (wallets, balances, history, send)
 ```
 
 ## Encrypted channel (Step 12, optional)
@@ -229,13 +138,13 @@ This is off unless the app starts it, or the device has `require_secure_channel`
 (then only `ping`, `get_pubkey` and `handshake` work in plaintext).
 
 1. The app makes an X25519 key pair `(a, A)` and sends
-   `{"id":1,"cmd":"handshake","client_pubkey":"<base64 A>"}`. If the device is
-   PIN-locked, it asks for the PIN first.
+   `{"id":1,"command":"handshake","params":{"client_pubkey":"<base64 A>"}}`.
 2. The device replies in plaintext:
-   `{"ok":true,"device_ephemeral":"<base64 B>","pubkey":"<base58 device key>","signature":"<base64>"}`.
+   `{"id":1,"result":{"device_ephemeral":"<base64 B>","device_id":"<base58 identity key>","signature":"<base64>"}}`.
+   The identity key signs it, so no wallet or PIN is needed.
 3. The app checks:
-   - that `pubkey` is the device it paired with;
-   - the ed25519 `signature` over `transcript = "WFW-HANDSHAKE-V1" (16 ASCII bytes) ‖ A ‖ B ‖ devicePubkey`.
+   - that `device_id` is the device it paired with;
+   - the ed25519 `signature` over `transcript = "WFW-HANDSHAKE-V1" (16 ASCII bytes) ‖ A ‖ B ‖ identityPubkey`.
 4. Both sides derive the session keys:
    - `shared = X25519(a, B)`
    - `okm = HKDF-SHA256(salt = SHA-256(transcript), ikm = shared, info = "wfw1 session keys", L = 64)`
@@ -255,8 +164,8 @@ PIN-protected wallet relocks after `auto_lock_s` (default 300 s) without a promp
 
 | Item | Value |
 |---|---|
-| Reply to non-prompting commands | < 50 ms (`confirm_backup` ~ 20–50 ms on a Pi 4 because of PBKDF2) |
+| Reply to non-prompting commands | < 50 ms |
 | Confirm hold | 2 s (`hold_confirm_ms`) |
 | `sign_tx` prompt timeout | 180 s (`review_timeout_s`) |
-| `setup` / `show_words` timeout | 900 s (`setup_timeout_s`) |
+| `setup` / `show_seed` timeout | 900 s (`setup_timeout_s`); the app waits 900 s, and 200 s for `pair` / `sign_tx` |
 | PIN unlock (Argon2id) | ~0.5–1 s on a Pi 4 |
