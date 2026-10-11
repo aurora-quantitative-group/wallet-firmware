@@ -270,6 +270,7 @@ int main(int argc, char** argv) {
       if (slash != std::string::npos && slash > 0) {
         const std::string dir = opt.keyControl.substr(0, slash);
         ::mkdir(dir.c_str(), 0755);
+        ::chmod(dir.c_str(), 0755);  // regardless of the caller's umask
       }
       ::mkfifo(opt.keyControl.c_str(), 0622);
       ::chmod(opt.keyControl.c_str(), 0622);
