@@ -16,7 +16,7 @@ struct Rgb {
 
 namespace colors {
 constexpr Rgb kOff{0, 0, 0};
-constexpr Rgb kIdle{40, 40, 60};
+constexpr Rgb kIdle{140, 140, 160};  // bright enough to read in a lit room
 constexpr Rgb kSetup{0, 90, 255};
 constexpr Rgb kLow{0, 255, 0};       // green
 constexpr Rgb kMedium{255, 180, 0};  // yellow
