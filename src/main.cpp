@@ -25,6 +25,7 @@
 #include "hal/linux/gpiod_io.h"
 #include "hal/linux/grove_lcd.h"
 #include "hal/linux/i2c_bus.h"
+#include "hw_test.h"
 #endif
 
 using namespace wfw;
@@ -48,6 +49,7 @@ struct Options {
   bool simQuiet = false;
   bool verbose = false;
   bool wipe = false;
+  bool hwTest = false;
 };
 
 void usage() {
@@ -58,6 +60,7 @@ void usage() {
       "  --data-dir PATH        wallet storage directory (default /var/lib/wallet-fw)\n"
       "  --verbose              debug logging\n"
       "  --wipe                 delete the wallet and known recipients (asks to confirm)\n"
+      "  --hw-test              LCD pages / buttons / buzzer check (stop the service first)\n"
       "  --version              print the firmware version\n"
       "Simulator (no Pi hardware needed):\n"
       "  --sim                  console LCD, typed button commands, PTY serial port\n"
@@ -88,6 +91,7 @@ bool parseArgs(int argc, char** argv, Options& o) {
     else if (a == "--sim-quiet") o.simQuiet = true;
     else if (a == "--verbose") o.verbose = true;
     else if (a == "--wipe") o.wipe = true;
+    else if (a == "--hw-test") o.hwTest = true;
     else if (a == "--version") {
       std::cout << "wallet-fw " << WFW_VERSION << " (protocol " << device::kProtocolVersion << ")\n";
       std::exit(0);
@@ -157,6 +161,13 @@ int main(int argc, char** argv) {
   if (!opt.serial.empty()) cfg.serialDevice = opt.serial;
   if (!opt.dataDir.empty()) cfg.dataDir = opt.dataDir;
   if (opt.wipe) return wipeWallet(cfg);
+#if defined(WFW_HARDWARE)
+  if (opt.hwTest) {
+    std::signal(SIGINT, onSignal);
+    std::signal(SIGTERM, onSignal);
+    return runHardwareTest(cfg, g_stop);
+  }
+#endif
 
   if (!fs::ensureDir(cfg.dataDir, 0700, err)) {
     LOG_ERROR("%s", err.c_str());

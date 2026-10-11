@@ -81,7 +81,8 @@ if(WFW_HARDWARE)
   target_sources(wfw_hal PRIVATE
     src/hal/linux/i2c_bus.cpp
     src/hal/linux/grove_lcd.cpp
-    src/hal/linux/gpiod_io.cpp)
+    src/hal/linux/gpiod_io.cpp
+    src/hw_test.cpp)
   target_link_libraries(wfw_hal PUBLIC PkgConfig::GPIOD)
   if(GPIOD_VERSION VERSION_GREATER_EQUAL 2)
     target_compile_definitions(wfw_hal PRIVATE WFW_GPIOD_V2=1)
