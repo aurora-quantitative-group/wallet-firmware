@@ -1,23 +1,23 @@
 #pragma once
 
-// Serial protocol constants. The full contract (request/response shapes,
-// timing, error semantics) is in docs/firmware/protocol-contract.md.
+// Aurora serial protocol constants. The full contract (request/response
+// shapes, timing, error semantics) is in docs/firmware/protocol-contract.md;
+// the Aurora desktop app (wallet-software) implements the other side.
 
 namespace wfw::device {
 
-constexpr int kProtocolVersion = 1;
+constexpr int kProtocolVersion = 2;
 constexpr size_t kMaxLineBytes = 8192;  // a 1232-byte message is ~1.7 KB of base64
 
 namespace cmd {
-constexpr const char* kPing = "ping";
-constexpr const char* kGetPubkey = "get_pubkey";
-constexpr const char* kSetup = "setup";
-constexpr const char* kSignTx = "sign_tx";
-// Extensions beyond the four commands in build manual Step 4:
-constexpr const char* kShowWords = "show_words";          // re-show words until backup confirmed
-constexpr const char* kConfirmBackup = "confirm_backup";  // check the typed-back phrase
-constexpr const char* kCancel = "cancel";                 // abort the pending device prompt
-constexpr const char* kHandshake = "handshake";           // Step 12 encrypted channel
+constexpr const char* kPing = "ping";              // signed identity + wallet manifest
+constexpr const char* kSetup = "setup";            // new wallet: words + on-device check
+constexpr const char* kShowSeed = "show_seed";     // finish an unconfirmed backup
+constexpr const char* kPair = "pair";              // approve this app on the device
+constexpr const char* kSignTx = "sign_tx";         // clear-sign a Solana message
+constexpr const char* kCancel = "cancel";          // abort the pending device prompt
+constexpr const char* kGetPubkey = "get_pubkey";   // unsigned convenience lookup
+constexpr const char* kHandshake = "handshake";    // optional encrypted channel
 }  // namespace cmd
 
 namespace err {
@@ -32,10 +32,10 @@ constexpr const char* kStorageError = "storage_error";
 constexpr const char* kDisplayUnavailable = "display_unavailable";
 constexpr const char* kInvalidMessage = "invalid_message";
 constexpr const char* kNotSigner = "not_signer";
+constexpr const char* kWrongWallet = "wrong_wallet";
 constexpr const char* kRejected = "rejected";
 constexpr const char* kCancelled = "cancelled";
 constexpr const char* kTimeout = "timeout";
-constexpr const char* kPhraseMismatch = "phrase_mismatch";
 constexpr const char* kBackupAlreadyConfirmed = "backup_already_confirmed";
 constexpr const char* kPinLocked = "pin_locked";
 constexpr const char* kSecureChannelRequired = "secure_channel_required";

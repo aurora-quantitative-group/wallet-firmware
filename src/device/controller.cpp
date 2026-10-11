@@ -31,7 +31,6 @@ void Controller::onLine(const std::string& line) {
   const auto enc = req.find("enc");
   if (enc == req.end()) {
     dispatch(req, false);
-    wipeWords(req);
     return;
   }
   if (!enc->is_string()) {
@@ -56,16 +55,6 @@ void Controller::onLine(const std::string& line) {
     return;
   }
   dispatch(inner, true);
-  wipeWords(inner);
-}
-
-// confirm_backup carries the recovery words; do not leave them in freed heap.
-void Controller::wipeWords(json& req) {
-  const auto w = req.find("words");
-  if (w != req.end() && w->is_string()) {
-    auto& s = w->get_ref<std::string&>();
-    if (!s.empty()) sodium_memzero(s.data(), s.size());
-  }
 }
 
 void Controller::onOverflow() {
@@ -82,12 +71,19 @@ void Controller::dispatch(const json& req, bool encrypted) {
     }
     ctx.id = *id;
   }
-  const auto c = req.find("cmd");
+  const auto c = req.find("command");
   if (c == req.end() || !c->is_string()) {
-    replyError(ctx, err::kInvalidRequest, "missing string field 'cmd'");
+    replyError(ctx, err::kInvalidRequest, "missing string field 'command'");
     return;
   }
   const std::string& name = c->get_ref<const std::string&>();
+  static const json kNoParams = json::object();
+  const auto p = req.find("params");
+  if (p != req.end() && !p->is_object()) {
+    replyError(ctx, err::kInvalidRequest, "params must be an object");
+    return;
+  }
+  const json& params = p == req.end() ? kNoParams : *p;
   LOG_DEBUG("request: %s%s", name.c_str(), encrypted ? " (encrypted)" : "");
 
   if (s_.config.requireSecureChannel && !encrypted && name != cmd::kPing &&
@@ -96,30 +92,47 @@ void Controller::dispatch(const json& req, bool encrypted) {
     return;
   }
   if (name == cmd::kPing) {
-    handlePing(ctx);
+    handlePing(ctx, params);
   } else if (name == cmd::kGetPubkey) {
     handleGetPubkey(ctx);
   } else if (name == cmd::kSetup) {
     handleSetup(ctx);
+  } else if (name == cmd::kShowSeed) {
+    handleShowSeed(ctx);
+  } else if (name == cmd::kPair) {
+    handlePair(ctx, params);
   } else if (name == cmd::kSignTx) {
-    handleSignTx(ctx, req);
-  } else if (name == cmd::kShowWords) {
-    handleShowWords(ctx);
-  } else if (name == cmd::kConfirmBackup) {
-    handleConfirmBackup(ctx, req);
+    handleSignTx(ctx, params);
   } else if (name == cmd::kCancel) {
     handleCancel(ctx);
   } else if (name == cmd::kHandshake) {
-    handleHandshake(ctx, req);
+    handleHandshake(ctx, params);
   } else {
-    replyError(ctx, err::kUnknownCmd, "unknown cmd '" + lcdSanitize(name.substr(0, 32)) + "'");
+    replyError(ctx, err::kUnknownCmd, "unknown command '" + lcdSanitize(name.substr(0, 32)) + "'");
   }
   render();
 }
 
+// Handlers build {"ok": true, ...} or {"ok": false, "error": code, "message"};
+// on the wire that becomes {"id", "result"} or {"id", "error": <text for the
+// user>, "code", "detail"} (protocol v2).
 void Controller::reply(const Ctx& ctx, json body) {
-  body["id"] = ctx.id;
-  std::string text = body.dump(-1, ' ', false, json::error_handler_t::replace);
+  json out = {{"id", ctx.id}};
+  const bool ok = body.value("ok", false);
+  body.erase("ok");
+  if (ok) {
+    out["result"] = std::move(body);
+  } else {
+    const std::string code = body.value("error", std::string(err::kInternal));
+    const std::string detail = body.value("message", std::string());
+    body.erase("error");
+    body.erase("message");
+    out["error"] = humanError(code);
+    out["code"] = code;
+    if (!detail.empty()) out["detail"] = detail;
+    for (auto& [key, value] : body.items()) out[key] = value;  // e.g. risk, reason
+  }
+  std::string text = out.dump(-1, ' ', false, json::error_handler_t::replace);
   if (ctx.encrypted) {
     if (!channel_.active()) {
       LOG_WARN("dropping encrypted reply: secure channel is gone");
@@ -194,6 +207,8 @@ void Controller::onLinkReset() {
 void Controller::onButton(const ui::ButtonEvent& ev) {
   switch (mode_) {
     case Mode::Words: onWordsButton(ev); break;
+    case Mode::Quiz: onQuizButton(ev); break;
+    case Mode::Pair: onPairButton(ev); break;
     case Mode::Pin: onPinButton(ev); break;
     case Mode::Review: onReviewButton(ev); break;
     case Mode::Notice:
@@ -229,10 +244,10 @@ void Controller::tick() {
 
 // ----------------------------------------------------------------- screens --
 
+// "Aurora 7xKX": stable per device (from the identity key, not the wallet).
 std::string Controller::deviceName() const {
   if (!s_.config.deviceName.empty()) return s_.config.deviceName;
-  if (!s_.keystore.initialized()) return "SolPi";
-  return "SolPi-" + s_.keystore.address().substr(0, 4);
+  return "Aurora " + s_.identity.deviceId().substr(0, 4);
 }
 
 void Controller::showIdle() {
@@ -240,7 +255,7 @@ void Controller::showIdle() {
   const auto& ks = s_.keystore;
   switch (ks.status()) {
     case storage::Keystore::Status::Empty:
-      base_ = {"SOLPI WALLET", "RUN SETUP IN APP", ui::colors::kIdle};
+      base_ = {"AURORA", "SET UP IN APP", ui::colors::kIdle};
       break;
     case storage::Keystore::Status::Error:
       base_ = {"KEYSTORE ERROR", "SEE DEVICE LOGS", ui::colors::kHigh};
@@ -274,7 +289,7 @@ bool Controller::holdStartedInSession(const ui::ButtonEvent& ev) const {
 void Controller::render() {
   ui::Screen out = base_;
   const bool holdMode =
-      mode_ == Mode::Review ||
+      mode_ == Mode::Review || mode_ == Mode::Quiz || mode_ == Mode::Pair ||
       (mode_ == Mode::Words && wordIndex_ == static_cast<int>(crypto::kMnemonicWords) - 1);
   if (!hint_.empty()) {
     out.bottom = hint_;

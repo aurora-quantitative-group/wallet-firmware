@@ -24,7 +24,7 @@ constexpr size_t kMaxAppReason = 64;
 
 }  // namespace
 
-void Controller::handleSignTx(const Ctx& ctx, const json& req) {
+void Controller::handleSignTx(const Ctx& ctx, const json& req) {  // req = params
   if (!checkReadyForPrompt(ctx)) return;
   const auto& ks = s_.keystore;
   if (ks.status() == storage::Keystore::Status::Error) {
@@ -45,8 +45,16 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {
     replyError(ctx, err::kInvalidRequest, "message must be base64 of the serialized message");
     return;
   }
-  // The app's level is advisory; missing means "medium" (the Step 10 fallback).
-  policy::RiskLevel appLevel = policy::RiskLevel::Medium;
+  // `address` selects the signing wallet; it must be this device's key.
+  if (const auto a = req.find("address"); a != req.end()) {
+    if (!a->is_string() || a->get_ref<const std::string&>() != ks.address()) {
+      replyError(ctx, err::kWrongWallet, "address is not this device's Solana wallet");
+      return;
+    }
+  }
+  // The app's level can only raise the device's own verdict; without one the
+  // device rule decides alone.
+  policy::RiskLevel appLevel = policy::RiskLevel::Low;
   if (const auto r = req.find("risk"); r != req.end()) {
     const auto parsed = r->is_string() ? policy::parseRiskLevel(r->get<std::string>()) : std::nullopt;
     if (!parsed) {
