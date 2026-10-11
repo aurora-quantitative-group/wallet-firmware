@@ -44,7 +44,7 @@ fi
 
 echo "== Packages"
 apt-get update
-apt-get install -y build-essential cmake pkg-config libsodium-dev libgpiod-dev \
+apt-get install -y build-essential cmake pkg-config libsodium-dev libsecp256k1-dev libgpiod-dev \
   nlohmann-json3-dev i2c-tools gpiod python3-serial python3-nacl
 
 echo "== Step 1: I2C for the Grove LCD"

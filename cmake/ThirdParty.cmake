@@ -25,7 +25,7 @@ function(wfw_fetch url dest sha256)
   endif()
 endfunction()
 
-# trezor-crypto, BIP-39 subset, from trezor-firmware tag core/v2.12.5 (MIT).
+# trezor-crypto, BIP-39 / RIPEMD-160 / bech32 subset, from trezor-firmware tag core/v2.12.5 (MIT).
 set(_tz https://raw.githubusercontent.com/trezor/trezor-firmware/core/v2.12.5/crypto)
 set(WFW_TREZOR_FILES
   LICENSE b53d2eb93806f3d618370726f27eafeb6c279c7a90351297f79e073e49e569be
@@ -44,6 +44,10 @@ set(WFW_TREZOR_FILES
   pbkdf2.c 8482559322823c26ba3676eb281f229d4b0fc9d0cf22f9271629a1b8eef89736
   pbkdf2.h 8dfb7eea8ee9e0f99ff875a16d7fec538518227fbaa71fb0b9efc9a18b4e0483
   rand.h 161ecc075038007a61fa7805b2d532bf36dabe521c3de480899eb4b8daa37c66
+  ripemd160.c 819dbc7aa10c919feb7ede7aca303abd561379e5f816f680aab87a06f7181b7d
+  ripemd160.h 1c9cafb5cb0444ae815c138801252c6f0ffe3306e85180d952ff21be943b0305
+  segwit_addr.c 6f55007478e9988cc4fed000852f689bbf6869da08c8a0ff6ed59a91bbff4e94
+  segwit_addr.h 5274a0701e4cac8d811c83f5c66873754af41fdbb89d414044d424acd55f3dad
   sha2.c 4e0a22b05988882a1f857084fc6c5a0731a115f5637e9946f65ccd23f361e24a
   sha2.h acc5ba73f3ca604ebbaa34651d254eee7eaab808198ce60c42c015e723d9a656)
 while(WFW_TREZOR_FILES)

@@ -28,12 +28,15 @@ class Keystore {
   bool pinProtected() const { return pinProtected_; }
   const PubKey& publicKey() const { return publicKey_; }
   std::string address() const;
+  // BIP-84 receive address (public; stored so it is known while locked).
+  const std::string& bitcoinAddress() const { return bitcoinAddress_; }
   bool backupConfirmed() const { return backupConfirmed_; }
   const std::string& lastError() const { return lastError_; }
 
   // Creates and persists a new wallet from entropy. Empty pin = no PIN.
+  // backupConfirmed: the user already proved the backup on the device.
   bool create(const uint8_t entropy[crypto::kEntropyBytes], const std::string& pin,
-              std::string& err);
+              std::string& err, bool backupConfirmed = false);
   // Decrypts with the PIN and checks the derived key against the stored one.
   bool unlock(const std::string& pin, std::string& err);
   // Drops decrypted secrets from memory (PIN-protected wallets only).
@@ -61,6 +64,7 @@ class Keystore {
   Status status_ = Status::Empty;
   std::string lastError_;
   PubKey publicKey_{};
+  std::string bitcoinAddress_;
   bool backupConfirmed_ = false;
   bool pinProtected_ = false;
   int pinFailures_ = 0;

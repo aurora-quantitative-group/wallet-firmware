@@ -15,6 +15,8 @@ option(WFW_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SODIUM REQUIRED IMPORTED_TARGET libsodium>=1.0.18)
+# Bitcoin Core's secp256k1, for BIP-84 address derivation (libsecp256k1-dev).
+pkg_check_modules(SECP256K1 REQUIRED IMPORTED_TARGET libsecp256k1>=0.2.0)
 include(cmake/ThirdParty.cmake)
 
 if(WFW_SANITIZE)
@@ -22,7 +24,7 @@ if(WFW_SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-# --- trezor-crypto (BIP-39 only), fetched by cmake/ThirdParty.cmake ---
+# --- trezor-crypto (BIP-39, RIPEMD-160, bech32), fetched by cmake/ThirdParty.cmake ---
 add_library(trezor_crypto STATIC
   third_party/trezor-crypto/bip39.c
   third_party/trezor-crypto/bip39_english.c
@@ -30,6 +32,8 @@ add_library(trezor_crypto STATIC
   third_party/trezor-crypto/hmac.c
   third_party/trezor-crypto/memzero.c
   third_party/trezor-crypto/pbkdf2.c
+  third_party/trezor-crypto/ripemd160.c
+  third_party/trezor-crypto/segwit_addr.c
   third_party/trezor-crypto/sha2.c
   src/crypto/trezor_platform.c)
 target_include_directories(trezor_crypto SYSTEM PUBLIC third_party/trezor-crypto)
@@ -46,6 +50,7 @@ add_library(wfw_core STATIC
   src/util/fs.cpp
   src/crypto/encoding.cpp
   src/crypto/keys.cpp
+  src/crypto/bitcoin.cpp
   src/crypto/hkdf.cpp
   src/crypto/secure_channel.cpp
   src/solana/message.cpp
@@ -54,6 +59,7 @@ add_library(wfw_core STATIC
   src/policy/risk.cpp
   src/storage/keystore.cpp
   src/storage/recipients.cpp
+  src/storage/identity.cpp
   src/config.cpp
   src/ui/button_input.cpp
   src/ui/screen.cpp
@@ -64,7 +70,8 @@ add_library(wfw_core STATIC
   src/device/controller_setup.cpp
   src/device/controller_sign.cpp)
 target_include_directories(wfw_core PUBLIC src)
-target_link_libraries(wfw_core PUBLIC PkgConfig::SODIUM trezor_crypto nlohmann_json::nlohmann_json)
+target_link_libraries(wfw_core PUBLIC PkgConfig::SODIUM PkgConfig::SECP256K1 trezor_crypto
+  nlohmann_json::nlohmann_json)
 target_compile_options(wfw_core PRIVATE ${WFW_WARNINGS})
 target_compile_definitions(wfw_core PUBLIC WFW_VERSION="${PROJECT_VERSION}")
 
@@ -112,7 +119,8 @@ if(WFW_BUILD_TESTS)
     tests/unit/test_controller.cpp
     tests/unit/test_controller_sign.cpp
     tests/unit/test_controller_secure.cpp
-    tests/unit/test_controller_review.cpp)
+    tests/unit/test_controller_review.cpp
+    tests/unit/test_protocol_v2.cpp)
   target_link_libraries(wfw_tests PRIVATE wfw_core)
   target_compile_definitions(wfw_tests PRIVATE
     WFW_TEST_VECTORS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/third_party/vectors")

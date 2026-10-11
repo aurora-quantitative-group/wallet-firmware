@@ -4,6 +4,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "crypto/bitcoin.h"
 #include "util/fs.h"
 
 namespace wfw::storage {
@@ -43,6 +44,10 @@ bool Keystore::adoptEntropy(const uint8_t* entropy, std::string& err) {
     err = "keystore integrity check failed (public key mismatch)";
     return false;
   }
+  if (bitcoinAddress_.empty() && !crypto::bip84Address(m, 0, bitcoinAddress_)) {
+    err = "bitcoin address derivation failed";
+    return false;
+  }
   entropy_.copyFrom(entropy);
   keyPair_.publicKey = kp.publicKey;
   keyPair_.secretKey.copyFrom(kp.secretKey);
@@ -78,6 +83,7 @@ bool Keystore::load(std::string& err) {
     if (!pub) return fail("keystore public key is invalid");
     backupConfirmed_ = doc.value("backup_confirmed", false);
     pinFailures_ = doc.value("pin_failures", 0);
+    bitcoinAddress_ = doc.value("btc_address", "");
     const json& secret = doc.at("secret");
     const std::string scheme = secret.at("scheme").get<std::string>();
 
@@ -144,6 +150,7 @@ bool Keystore::persist(std::string& err) {
               {"pubkey", address()},
               {"backup_confirmed", backupConfirmed_},
               {"pin_failures", pinFailures_},
+              {"btc_address", bitcoinAddress_},
               {"secret", secret}};
   std::string text = doc.dump(2) + "\n";
   const bool ok = fs::writeFileAtomic(path_, text, 0600, err);
@@ -152,14 +159,15 @@ bool Keystore::persist(std::string& err) {
 }
 
 bool Keystore::create(const uint8_t entropy[crypto::kEntropyBytes], const std::string& pin,
-                      std::string& err) {
+                      std::string& err, bool backupConfirmed) {
   if (initialized()) {
     err = "already initialized";
     return false;
   }
   status_ = Status::Empty;
+  bitcoinAddress_.clear();
   if (!adoptEntropy(entropy, err)) return false;
-  backupConfirmed_ = false;
+  backupConfirmed_ = backupConfirmed;
   pinProtected_ = !pin.empty();
   pinFailures_ = 0;
 
@@ -259,6 +267,7 @@ bool Keystore::wipe(std::string& err) {
   keyPair_.secretKey.wipe();
   keyPair_.publicKey = {};
   publicKey_ = {};
+  bitcoinAddress_.clear();
   backupConfirmed_ = false;
   pinFailures_ = 0;
   pinProtected_ = false;
