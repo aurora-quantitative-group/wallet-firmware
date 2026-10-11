@@ -64,7 +64,8 @@ bool child(const Node& parent, uint32_t index, Node& out) {
 
 }  // namespace
 
-bool bip84Address(const uint8_t* seed, size_t seedLen, uint32_t account, std::string& out) {
+bool bip84Address(const uint8_t* seed, size_t seedLen, uint32_t account, std::string& out, uint32_t index) {
+  if (account >= kHardened || index >= kHardened) return false;
   static const char kKey[] = "Bitcoin seed";
   Secret<64> i;
   hmac512(reinterpret_cast<const uint8_t*>(kKey), sizeof(kKey) - 1, seed, seedLen, i);
@@ -73,10 +74,10 @@ bool bip84Address(const uint8_t* seed, size_t seedLen, uint32_t account, std::st
   node.chain.copyFrom(i.data() + 32);
   if (!secp256k1_ec_seckey_verify(context(), node.key.data())) return false;
 
-  const uint32_t path[] = {84 | kHardened, 0 | kHardened, account | kHardened, 0, 0};
-  for (const uint32_t index : path) {
+  const uint32_t path[] = {84 | kHardened, 0 | kHardened, account | kHardened, 0, index};
+  for (const uint32_t childIndex : path) {
     Node next;
-    if (!child(node, index, next)) return false;
+    if (!child(node, childIndex, next)) return false;
     node.key.copyFrom(next.key);
     node.chain.copyFrom(next.chain);
   }
@@ -92,10 +93,10 @@ bool bip84Address(const uint8_t* seed, size_t seedLen, uint32_t account, std::st
   return true;
 }
 
-bool bip84Address(const Mnemonic& m, uint32_t account, std::string& out) {
+bool bip84Address(const Mnemonic& m, uint32_t account, std::string& out, uint32_t index) {
   Secret<kBip39SeedBytes> seed;
   mnemonicToSeed(m, "", seed);
-  return bip84Address(seed.data(), seed.size(), account, out);
+  return bip84Address(seed.data(), seed.size(), account, out, index);
 }
 
 }  // namespace wfw::crypto
