@@ -66,9 +66,10 @@ class PtySerial final : public SerialLink {
   int keepAliveFd_ = -1;  // our own slave fd keeps the master from seeing HUP
 };
 
-// DEVELOPMENT ONLY: serves the protocol to one TCP client at a time, so the
-// Aurora app (debug build, WALLET_SERIAL_PORT=tcp://host:port) can reach the
-// simulator or a Pi without a USB cable. Anyone who can reach the port can
+// Serves the protocol to one TCP client at a time: config tcp_listen (e.g. an
+// Ethernet cable to the laptop) or --tcp-listen for development. The
+// Aurora app connects with "Connect over network" (or WALLET_SERIAL_PORT).
+// Anyone who can reach the port can
 // send requests; approving anything still needs the physical buttons.
 class TcpListenLink final : public SerialLink {
  public:

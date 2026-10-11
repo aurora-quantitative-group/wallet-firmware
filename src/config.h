@@ -12,6 +12,10 @@ struct Config {
   // Serial link (Step 2): USB gadget by default, /dev/serial0 for the Pico fallback.
   std::string serialDevice = "/dev/ttyGS0";
   int serialBaud = 115200;
+  // "HOST:PORT" serves the protocol over the network instead of serial (e.g.
+  // an Ethernet cable to the laptop). Empty = serial. Approvals still need
+  // the buttons; anyone who can reach the port can send requests.
+  std::string tcpListen;
 
   std::string dataDir = "/var/lib/wallet-fw";
   std::string deviceName;  // empty: "SolPi-" + first 4 chars of the address

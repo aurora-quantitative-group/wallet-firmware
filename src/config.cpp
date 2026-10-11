@@ -64,6 +64,7 @@ const std::map<std::string, Setter>& setters() {
   static const std::map<std::string, Setter> table = {
       {"serial_device", str(&Config::serialDevice)},
       {"serial_baud", integer(&Config::serialBaud, 1200, 4000000)},
+      {"tcp_listen", str(&Config::tcpListen)},
       {"data_dir", str(&Config::dataDir)},
       {"device_name", str(&Config::deviceName)},
       {"i2c_bus", str(&Config::i2cBus)},

@@ -5,6 +5,9 @@
   // "/dev/ttyGS0" = USB gadget (Step 2). "/dev/serial0" = Pico UART fallback.
   "serial_device": "/dev/ttyGS0",
   "serial_baud": 115200,
+  // Ethernet to the laptop instead of USB: "0.0.0.0:7777". Then, in the
+  // Aurora app, "Connect over network" with the Pi's address and port 7777.
+  "tcp_listen": "",
   "data_dir": "/var/lib/wallet-fw",
   "device_name": "",
 

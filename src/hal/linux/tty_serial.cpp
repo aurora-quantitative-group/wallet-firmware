@@ -196,7 +196,7 @@ bool TcpListenLink::open() {
     ::freeaddrinfo(res);
     listenFd_ = fd;
     listenFailing_ = false;
-    LOG_WARN("DEVELOPMENT transport listening on %s (approvals still need the buttons)",
+    LOG_WARN("network link listening on %s (approvals still need the buttons)",
              describe().c_str());
   }
   fd_ = ::accept4(listenFd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);

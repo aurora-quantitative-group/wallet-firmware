@@ -264,6 +264,13 @@ int main(int argc, char** argv) {
     if (!opt.keyControl.empty()) {
       // A FIFO anyone on the Pi may write (0622): whoever can write it can
       // press "hold right", so this is for development with a broken screen.
+      // In its own non-sticky folder: Linux refuses shell redirects into a
+      // FIFO another user owns in a sticky directory like /tmp itself.
+      const auto slash = opt.keyControl.rfind('/');
+      if (slash != std::string::npos && slash > 0) {
+        const std::string dir = opt.keyControl.substr(0, slash);
+        ::mkdir(dir.c_str(), 0755);
+      }
       ::mkfifo(opt.keyControl.c_str(), 0622);
       ::chmod(opt.keyControl.c_str(), 0622);
       const int fd = ::open(opt.keyControl.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -280,6 +287,7 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  if (opt.tcpListen.empty()) opt.tcpListen = cfg.tcpListen;  // CLI wins over config
   if (!opt.tcpListen.empty()) {
     const auto colon = opt.tcpListen.rfind(':');
     const int port = colon == std::string::npos ? 0 : std::atoi(opt.tcpListen.c_str() + colon + 1);
