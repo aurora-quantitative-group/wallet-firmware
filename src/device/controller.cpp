@@ -97,6 +97,8 @@ void Controller::dispatch(const json& req, bool encrypted) {
   }
   if (name == cmd::kPing) {
     handlePing(ctx, params);
+  } else if (name == cmd::kReceiveAddress) {
+    handleReceiveAddress(ctx, params);
   } else if (name == cmd::kGetPubkey) {
     handleGetPubkey(ctx);
   } else if (name == cmd::kSetup) {

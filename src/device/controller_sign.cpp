@@ -45,12 +45,26 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {  // req = param
     replyError(ctx, err::kInvalidRequest, "message must be base64 of the serialized message");
     return;
   }
-  // `address` selects the signing wallet; it must be this device's key.
-  if (const auto a = req.find("address"); a != req.end()) {
-    if (!a->is_string() || a->get_ref<const std::string&>() != ks.address()) {
-      replyError(ctx, err::kWrongWallet, "address is not this device's Solana wallet");
+  uint32_t index = 0;
+  if (const auto value = req.find("address_index"); value != req.end()) {
+    if (!value->is_number_unsigned() || value->get<uint64_t>() >= crypto::kHardened ||
+        !ks.receiveIndexAllocated(value->get<uint32_t>())) {
+      replyError(ctx, err::kWrongWallet);
       return;
     }
+    index = value->get<uint32_t>();
+  }
+  PubKey self = ks.publicKey();
+  if (const auto a = req.find("address"); a != req.end()) {
+    const auto decoded = a->is_string() ? decodeAddress(a->get<std::string>()) : std::nullopt;
+    if (!decoded || (index == 0 && *decoded != self)) {
+      replyError(ctx, err::kWrongWallet);
+      return;
+    }
+    self = *decoded;
+  } else if (index != 0) {
+    replyError(ctx, err::kWrongWallet);
+    return;
   }
   // The app's level can only raise the device's own verdict; without one the
   // device rule decides alone.
@@ -74,7 +88,6 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {  // req = param
     replyError(ctx, err::kInvalidMessage, why);
     return;
   }
-  const PubKey self = ks.publicKey();
   bool signer = false;
   for (size_t i = 0; i < msg.numRequiredSignatures; ++i) signer |= msg.accountKeys[i] == self;
   if (!signer) {
@@ -90,6 +103,8 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {  // req = param
       tx, appLevel, appReason, [this](const PubKey& k) { return s_.recipients.contains(k); }, self,
       riskPolicy);
 
+  reviewIndex_ = index;
+  reviewSelf_ = self;
   reviewMessage_ = std::move(*message);
   reviewRecipients_.clear();
   for (const auto& t : tx.transfers) {
@@ -108,7 +123,16 @@ void Controller::handleSignTx(const Ctx& ctx, const json& req) {  // req = param
            risk_.reason.c_str());
 
   beginPending(Pending::Sign, ctx, s_.config.reviewTimeoutS);
-  requireUnlock([this] { startReview(); });
+  requireUnlock([this] {
+    crypto::KeyPair child;
+    if (!s_.keystore.solanaKey(reviewIndex_, child) || child.publicKey != reviewSelf_) {
+      finishPendingError(err::kWrongWallet);
+      clearSecrets();
+      showIdle();
+      return;
+    }
+    startReview();
+  });
 }
 
 void Controller::buildReviewPages(const solana::TxSummary& tx) {
@@ -230,7 +254,12 @@ void Controller::onReviewButton(const ui::ButtonEvent& ev) {
 }
 
 void Controller::approve() {
+  crypto::KeyPair child;
   const crypto::KeyPair* kp = s_.keystore.keyPair();
+  if (reviewIndex_ != 0) {
+    kp = s_.keystore.solanaKey(reviewIndex_, child) && child.publicKey == reviewSelf_
+             ? &child : nullptr;
+  }
   if (kp == nullptr) {
     finishPendingError(err::kInternal, "keystore locked");
     clearSecrets();

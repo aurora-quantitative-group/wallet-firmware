@@ -83,6 +83,7 @@ class Controller {
   void finishPending(json body);
   void finishPendingError(const char* code, const std::string& message = "");
   void handlePing(const Ctx& ctx, const json& params);
+  void handleReceiveAddress(const Ctx& ctx, const json& params);
   void handleGetPubkey(const Ctx& ctx);
   void handleCancel(const Ctx& ctx);
   void handleHandshake(const Ctx& ctx, const json& params);
@@ -196,6 +197,8 @@ class Controller {
   std::string setupPassword_;  // from the app's setup, until the wallet is saved
 
   // Transaction review.
+  uint32_t reviewIndex_ = 0;
+  PubKey reviewSelf_{};
   Bytes reviewMessage_;
   std::vector<Page> pages_;
   std::vector<bool> seen_;

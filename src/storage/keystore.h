@@ -47,6 +47,10 @@ class Keystore {
   int pinFailures() const { return pinFailures_; }
   bool setPinFailures(int count, std::string& err);
 
+  bool allocateReceive(const std::string& chain, uint32_t minimum, uint32_t& index,
+                       std::string& address, std::string& err);
+  bool receiveIndexAllocated(uint32_t index) const { return index < nextSol_; }
+  bool solanaKey(uint32_t index, crypto::KeyPair& out) const;
   bool mnemonic(crypto::Mnemonic& out) const;  // requires ready()
   const crypto::KeyPair* keyPair() const { return ready() ? &keyPair_ : nullptr; }
 
@@ -68,6 +72,8 @@ class Keystore {
   bool backupConfirmed_ = false;
   bool pinProtected_ = false;
   int pinFailures_ = 0;
+  uint32_t nextSol_ = 1;
+  uint32_t nextBtc_ = 1;
 
   // Encrypted blob as stored (kept so metadata updates can rewrite the file
   // without the PIN).

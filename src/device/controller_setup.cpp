@@ -413,6 +413,8 @@ void Controller::clearSecrets() {
   pairChallenge_.clear();
   pairCode_.clear();
   afterUnlock_ = nullptr;
+  reviewIndex_ = 0;
+  reviewSelf_ = {};
   reviewMessage_.clear();
   pages_.clear();
   seen_.clear();

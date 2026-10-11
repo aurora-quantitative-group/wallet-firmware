@@ -10,6 +10,7 @@ constexpr int kProtocolVersion = 2;
 constexpr size_t kMaxLineBytes = 8192;  // a 1232-byte message is ~1.7 KB of base64
 
 namespace cmd {
+constexpr const char* kReceiveAddress = "receive_address";
 constexpr const char* kPing = "ping";              // signed identity + wallet manifest
 constexpr const char* kSetup = "setup";            // new wallet: words + on-device check
 constexpr const char* kShowSeed = "show_seed";     // finish an unconfirmed backup

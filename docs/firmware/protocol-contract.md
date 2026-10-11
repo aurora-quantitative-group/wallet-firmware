@@ -43,7 +43,7 @@ signed over the exact payload bytes.
 ```json
 {"challenge":"…","device_id":"BpdE…","name":"Aurora BpdE","has_seed":true,"protocol":2,
  "firmware":"0.2.0","state":"ready","backup_confirmed":true,"pin_protected":false,
- "busy":false,"display_ok":true,"secure_channel":false,
+ "busy":false,"display_ok":true,"secure_channel":false,"receive_addresses":true,
  "wallets":[{"id":"sol-0","name":"Solana wallet","chain":"SOL","network":"mainnet","account":0,"address":"HAgk…"},
             {"id":"sol-dev","name":"Devnet wallet","chain":"SOL","network":"devnet","account":0,"address":"HAgk…"},
             {"id":"btc-0","name":"Bitcoin wallet","chain":"BTC","network":"mainnet","account":0,"address":"bc1q…"}]}
@@ -85,12 +85,48 @@ the backup is confirmed, Aurora refuses (`backup_already_confirmed`).
 The app verifies the signature, the challenge and the code before saving the
 link.
 
-### `sign_tx {address, message, risk?, reason?}`
+### `receive_address {wallet_id, minimum_index, challenge}`
+
+Requires an initialized, unlocked wallet and no active prompt. `wallet_id` is
+one of the signed manifest's IDs. `minimum_index` is an integer from 1 through
+2147483647; `challenge` is 8–128 characters. Unsupported wallets and malformed
+requests are rejected before allocating an index.
+
+The device returns `{"payload":"<JSON string>","signature":"<base64>"}`,
+signed by its persistent identity key over the exact payload bytes:
+
+```json
+{"device_id":"…","wallet_id":"btc-0","root_address":"bc1q…","chain":"BTC",
+ "network":"mainnet","account":0,"index":1,"path":"m/84'/0'/0'/0/1",
+ "address":"bc1q…","challenge":"…"}
+```
+
+The app checks the identity signature, challenge, wallet fields, path and index
+before retaining the address. The root address and manifest remain unchanged.
+The LCD shows the generated address; no recovery phrase or private key leaves
+the device.
+
+| Coin | Receive path |
+|---|---|
+| Bitcoin | BIP-84 `m/84'/0'/0'/0/{index}` |
+| Solana | SLIP-0010 `m/44'/501'/0'/{index}'` |
+
+Index 0 is the original wallet. Each chain has a durable next-index counter in
+`wallet.json`; both Solana clusters share that counter. Allocation uses the
+larger of the device counter and `minimum_index`. The counter is saved before
+the reply, so interrupted requests may skip an index but never reuse one.
+Counters survive locks and restarts. Erasing or recovering from only the phrase
+loses these counters; retain the app's public receive-address history when
+recovering the same wallet. A phrase backup still derives every address at its
+recorded path.
+
+### `sign_tx {address, address_index?, message, risk?, reason?}`
 
 | Param | Notes |
 |---|---|
 | `message` | Base64 of `transaction.serializeMessage()`: the legacy or v0 **message**, ≤ 1232 bytes. |
-| `address` | Must be this Aurora's Solana address, else `wrong_wallet`. |
+| `address` | Must match the Solana key at `address_index`, else `wrong_wallet`. |
+| `address_index` | Optional, defaults to 0. Must be a nonnegative index already allocated by this device. Generated addresses use the receive path above. |
 | `risk` | Optional: `low`, `medium` or `high`. It can only *raise* Aurora's verdict; when missing, Aurora's own rule decides. |
 | `reason` | Optional, ≤ 16 characters, shown on the risk page. |
 
@@ -120,7 +156,7 @@ The app adds the signature, verifies it, and broadcasts.
   Unlocking an unprotected or unlocked wallet is a no-op.
 - **`lock`** drops the decrypted keys and cancels any open prompt:
   `{"locked": bool}` (`false` when the wallet has no password).
-- While locked, `pair`, `sign_tx` and `show_seed` reply `locked` instead of
+- While locked, `pair`, `receive_address`, `sign_tx` and `show_seed` reply `locked` instead of
   prompting.
 
 The password crosses the cable in plaintext unless the encrypted channel is
