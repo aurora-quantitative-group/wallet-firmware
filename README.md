@@ -55,7 +55,7 @@ sudo reboot
 
 The script:
 
-- installs the build dependencies (libsodium, libgpiod, nlohmann-json, cmake);
+- installs the build dependencies (libsodium, libsecp256k1, libgpiod, nlohmann-json, cmake);
 - enables I2C and adds `dtoverlay=dwc2` plus the `dwc2` and `g_serial` modules (Step 2);
 - masks a login getty on `/dev/ttyGS0`;
 - creates the `walletfw` service user;
@@ -104,7 +104,7 @@ commits, put the signers' SSH keys in `/etc/aurora-update/allowed_signers`
 ### Manual build
 
 ```sh
-sudo apt install build-essential cmake pkg-config libsodium-dev libgpiod-dev nlohmann-json3-dev
+sudo apt install build-essential cmake pkg-config libsodium-dev libsecp256k1-dev libgpiod-dev nlohmann-json3-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4 && (cd build && ctest --output-on-failure)
 sudo ./build/wallet-fw --config deploy/config.example.json --data-dir /tmp/wfw --verbose
@@ -167,10 +167,24 @@ blockhash and submits the signed transfer (Step 6). `airdrop 1` funds the
 wallet, though the public faucet is often rate-limited (use faucet.solana.com).
 `--really-to <OTHER>` rehearses the "compromised app" demo toggle.
 
+## Receive addresses and payment pages
+
+Aurora's Receive screen requests a new device-derived address. Bitcoin uses
+BIP-84 and Solana uses hardened SLIP-0010 children. Per-chain counters survive
+restarts; Solana mainnet and devnet share the counter. The signed response binds
+the address to the paired device, wallet, derivation path and host challenge.
+Existing addresses remain valid. Generated Solana addresses can sign devnet
+transfers with the same screen review and physical confirmation as index 0.
+
+In the app repository, run `npm run site` to serve local payment pages on
+`http://127.0.0.1:4173`. Creating a payment page requests a fresh address first.
+The standalone checkout demo is `/pay/demo?coin=BTC` or `/pay/demo?coin=SOL`;
+it uses non-payable fixtures. See the app README for desktop and site builds.
+
 ## Tests
 
 ```sh
-./build/wfw_tests                                         # 94 unit tests
+./build/wfw_tests
 python3 tests/integration/test_sim.py build/wallet-fw     # 7 end-to-end tests, PTY + TCP
 cmake -S . -B build-asan -DWFW_SANITIZE=ON                # ASan + UBSan build
 ```
