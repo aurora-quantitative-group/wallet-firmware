@@ -1,8 +1,10 @@
-"""Reference host for the wallet-fw serial protocol.
+"""Reference host for the Aurora serial protocol (v2).
 
 Implements docs/firmware/protocol-contract.md from the host side: JSON-lines
-framing, request ids, the optional encrypted channel, and a Solana legacy
-transfer message builder. Used by the integration tests and wallet_cli.py.
+framing, request ids, identity verification, pairing, the optional encrypted
+channel, and a Solana legacy transfer message builder. Used by the
+integration tests and wallet_cli.py. The Aurora desktop app implements the
+same contract in Rust (wallet-software, src-tauri/src/device.rs).
 
 Dependencies: pyserial (or Linux/macOS termios fallback); pynacl for the
 encrypted channel and signature checks.
@@ -12,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import socket
 import struct
 import time
 
@@ -165,20 +168,53 @@ class _PySerialPort:
         self.ser.close()
 
 
+class _TcpPort:
+    """Development transport: wallet-fw --tcp-listen HOST:PORT."""
+
+    def __init__(self, address):
+        host, port = address[len("tcp://"):].rsplit(":", 1)
+        self.sock = socket.create_connection((host, int(port)), timeout=5)
+        self.sock.setblocking(False)
+
+    def write(self, data):
+        self.sock.setblocking(True)
+        self.sock.sendall(data)
+        self.sock.setblocking(False)
+
+    def read_some(self):
+        try:
+            data = self.sock.recv(4096)
+        except BlockingIOError:
+            return b""
+        if not data:
+            raise ConnectionError("device closed the connection")
+        return data
+
+    def close(self):
+        self.sock.close()
+
+
 class DeviceError(Exception):
     def __init__(self, reply):
-        super().__init__("%s: %s" % (reply.get("error"), reply.get("message", "")))
+        super().__init__("%s (%s)" % (reply.get("error"), reply.get("code")))
         self.reply = reply
+        self.code = reply.get("code")
 
 
 class Device:
     """One request in flight at a time, matched to its reply by id."""
 
     def __init__(self, path, baud=115200):
+        if path.startswith("tcp://"):
+            self.port = _TcpPort(path)
+            return self._init()
         try:
             self.port = _PySerialPort(path, baud)
         except ImportError:
             self.port = _TermiosPort(path, baud)
+        self._init()
+
+    def _init(self):
         self.secure = None
         self._next_id = 1
         self._buffer = b""
@@ -189,11 +225,11 @@ class Device:
     def send_line(self, line: str):
         self.port.write(line.encode() + b"\n")
 
-    def begin(self, cmd, **params):
-        req = {"id": self._next_id, "cmd": cmd, **params}
+    def begin(self, command, **params):
+        req = {"id": self._next_id, "command": command, "params": params}
         self._next_id += 1
         line = json.dumps(req)
-        if self.secure is not None and cmd != "handshake":
+        if self.secure is not None and command != "handshake":
             line = json.dumps({"enc": self.secure.seal(line)})
         self.send_line(line)
         return req["id"]
@@ -219,22 +255,51 @@ class Device:
         while True:
             msg = self.read_message(max(0.0, deadline - time.monotonic()))
             # Errors the device could not tie to a request carry id null.
-            if msg.get("id") == req_id or (msg.get("id") is None and not msg.get("ok")):
+            if msg.get("id") == req_id or (msg.get("id") is None and "error" in msg):
                 return msg
 
-    def request(self, cmd, timeout=30.0, check=True, **params):
-        reply = self.wait(self.begin(cmd, **params), timeout)
-        if check and not reply.get("ok"):
-            raise DeviceError(reply)
-        return reply
+    def request(self, command, timeout=30.0, check=True, **params):
+        """Returns the result object, or the error reply when check=False."""
+        reply = self.wait(self.begin(command, **params), timeout)
+        if "error" in reply:
+            if check:
+                raise DeviceError(reply)
+            return reply
+        return reply["result"]
 
-    def handshake(self, expected_pubkey: str = None):
+    def identity(self, expected_id=None):
+        """ping with a fresh challenge; verifies the identity signature."""
+        from nacl.signing import VerifyKey
+        challenge = os.urandom(16).hex()
+        result = self.request("ping", challenge=challenge)
+        payload = json.loads(result["payload"])
+        VerifyKey(b58decode(payload["device_id"])).verify(
+            result["payload"].encode(), base64.b64decode(result["signature"]))
+        if payload["challenge"] != challenge:
+            raise ValueError("stale identity reply")
+        if expected_id and payload["device_id"] != expected_id:
+            raise ValueError("device identity changed")
+        return payload
+
+    def pair(self, code, timeout=200.0):
+        """Asks the user to approve this host on the device (hold right)."""
+        from nacl.signing import VerifyKey
+        challenge = os.urandom(16).hex()
+        result = self.request("pair", timeout=timeout, challenge=challenge, code=code)
+        payload = json.loads(result["payload"])
+        VerifyKey(b58decode(payload["device_id"])).verify(
+            result["payload"].encode(), base64.b64decode(result["signature"]))
+        if payload["challenge"] != challenge or payload["code"] != code or not payload["paired"]:
+            raise ValueError("pairing reply does not match the request")
+        return payload
+
+    def handshake(self, expected_id: str = None):
         session = SecureSession()
         reply = self.request("handshake", client_pubkey=b64(session.public))
-        if expected_pubkey and reply["pubkey"] != expected_pubkey:
+        if expected_id and reply["device_id"] != expected_id:
             raise ValueError("device identity changed")
         session.complete(base64.b64decode(reply["device_ephemeral"]),
-                         b58decode(reply["pubkey"]), base64.b64decode(reply["signature"]))
+                         b58decode(reply["device_id"]), base64.b64decode(reply["signature"]))
         self.secure = session
         return reply
 
