@@ -70,9 +70,14 @@ id walletfw >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sb
 usermod -a -G i2c,gpio,dialout walletfw
 
 echo "== Build, test, install"
-cmake -S "$SRC_DIR" -B "$SRC_DIR/build" -DCMAKE_BUILD_TYPE=Release
-cmake --build "$SRC_DIR/build" -j"$(nproc)"
-(cd "$SRC_DIR/build" && ctest --output-on-failure)
+# Build as the user who owns the checkout (not root), so later
+# `git pull && cmake --build build` works without sudo.
+OWNER="$(stat -c %U "$SRC_DIR")"
+as_owner() { if [ "$OWNER" = root ]; then "$@"; else sudo -u "$OWNER" "$@"; fi; }
+chown -R "$OWNER": "$SRC_DIR"  # repair trees left root-owned by older versions
+as_owner cmake -S "$SRC_DIR" -B "$SRC_DIR/build" -DCMAKE_BUILD_TYPE=Release
+as_owner cmake --build "$SRC_DIR/build" -j"$(nproc)"
+(cd "$SRC_DIR/build" && as_owner ctest --output-on-failure)
 cmake --install "$SRC_DIR/build" --prefix /usr/local
 install -D -m 0644 "$SRC_DIR/README.md" /usr/local/share/doc/wallet-fw/README.md
 
