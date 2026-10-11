@@ -122,7 +122,8 @@ if(WFW_BUILD_TESTS)
     tests/unit/test_controller_secure.cpp
     tests/unit/test_controller_review.cpp
     tests/unit/test_protocol_v2.cpp
-    tests/unit/test_device_menu.cpp)
+    tests/unit/test_device_menu.cpp
+    tests/unit/test_password.cpp)
   target_link_libraries(wfw_tests PRIVATE wfw_core)
   target_compile_definitions(wfw_tests PRIVATE
     WFW_TEST_VECTORS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/third_party/vectors")

@@ -18,6 +18,8 @@ constexpr const char* kSignTx = "sign_tx";         // clear-sign a Solana messag
 constexpr const char* kCancel = "cancel";          // abort the pending device prompt
 constexpr const char* kReset = "reset";            // erase the wallet (confirmed on the device)
 constexpr const char* kBalances = "balances";      // balances for the device's wallet list
+constexpr const char* kUnlock = "unlock";          // password from the app decrypts the wallet
+constexpr const char* kLock = "lock";              // drop the decrypted keys from memory
 constexpr const char* kGetPubkey = "get_pubkey";   // unsigned convenience lookup
 constexpr const char* kHandshake = "handshake";    // optional encrypted channel
 }  // namespace cmd
@@ -45,6 +47,8 @@ constexpr const char* kNoSecureChannel = "no_secure_channel";
 constexpr const char* kDecryptFailed = "decrypt_failed";
 constexpr const char* kHandshakeFailed = "handshake_failed";
 constexpr const char* kAppDisconnected = "app_disconnected";
+constexpr const char* kLocked = "locked";
+constexpr const char* kWrongPassword = "wrong_password";
 constexpr const char* kInternal = "internal_error";
 }  // namespace err
 

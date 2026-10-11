@@ -53,6 +53,8 @@ std::string Controller::humanError(const std::string& code) {
       {err::kNoSecureChannel, "No encrypted session with Aurora."},
       {err::kDecryptFailed, "Aurora could not decrypt the request."},
       {err::kHandshakeFailed, "Aurora could not start an encrypted session."},
+      {err::kLocked, "Aurora is locked. Enter your password to unlock it."},
+      {err::kWrongPassword, "Wrong password."},
       {err::kAppDisconnected,
        "Aurora is disconnected from apps. On Aurora, open the menu and choose CONNECT APP."},
   };
@@ -181,6 +183,80 @@ void Controller::onPairButton(const ui::ButtonEvent& ev) {
     showNotice("PAIRED", "WITH THE APP", ui::colors::kLow, 2000);
     s_.buzzer.beep();
   }
+}
+
+// --------------------------------------------------------------- password --
+// A wallet created with an app password is encrypted at rest (Argon2id +
+// secretbox) and locked after a restart or auto_lock_s idle; the app sends
+// the password to unlock it. Wrong attempts are counted across restarts.
+
+void Controller::handleUnlock(const Ctx& ctx, const json& params) {
+  auto& ks = s_.keystore;
+  if (!ks.initialized()) {
+    replyError(ctx, err::kNotInitialized, "there is no wallet to unlock");
+    return;
+  }
+  if (ks.ready()) {
+    reply(ctx, {{"ok", true}, {"state", "ready"}});
+    return;
+  }
+  if (sessionActive()) {
+    replyError(ctx, err::kBusy, "a device prompt is in progress");
+    return;
+  }
+  if (pinFailures_ >= s_.config.pinMaxAttempts) {
+    replyError(ctx, err::kPinLocked, "too many wrong passwords");
+    return;
+  }
+  const auto pw = params.find("password");
+  if (pw == params.end() || !pw->is_string() || pw->get_ref<const std::string&>().empty() ||
+      pw->get_ref<const std::string&>().size() > 128) {
+    replyError(ctx, err::kInvalidRequest, "password must be 1-128 characters");
+    return;
+  }
+  base_ = {"UNLOCKING", "PLEASE WAIT", ui::colors::kSetup};
+  render();  // Argon2id takes about a second on a Pi 4
+  std::string password = pw->get<std::string>();
+  std::string why;
+  const bool ok = ks.unlock(password, why);
+  sodium_memzero(password.data(), password.size());
+  if (ok) {
+    pinFailures_ = 0;
+    ks.setPinFailures(0, why);
+    lastActivity_ = s_.clock.nowMs();
+    LOG_INFO("unlocked by password");
+    showIdle();
+    reply(ctx, {{"ok", true}, {"state", "ready"}});
+    return;
+  }
+  if (why != "wrong PIN") {
+    showIdle();
+    replyError(ctx, err::kInternal, why);
+    return;
+  }
+  ++pinFailures_;
+  ks.setPinFailures(pinFailures_, why);
+  LOG_WARN("wrong password (%d of %d)", pinFailures_, s_.config.pinMaxAttempts);
+  showNotice("WRONG PASSWORD", "", ui::colors::kHigh, 2000);
+  const int left = s_.config.pinMaxAttempts - pinFailures_;
+  if (left <= 0) {
+    replyError(ctx, err::kPinLocked, "too many wrong passwords");
+    return;
+  }
+  reply(ctx, {{"ok", false},
+              {"error", err::kWrongPassword},
+              {"message", std::to_string(left) + " attempts left"},
+              {"attempts_left", left}});
+}
+
+void Controller::handleLock(const Ctx& ctx) {
+  if (sessionActive()) {
+    finishPendingError(err::kCancelled, "Aurora was locked");
+    clearSecrets();
+  }
+  s_.keystore.lock();
+  showIdle();
+  reply(ctx, {{"ok", true}, {"locked", s_.keystore.pinProtected()}});
 }
 
 // ------------------------------------------------------ encrypted channel --

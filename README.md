@@ -5,7 +5,9 @@ Raspberry Pi 4B, and this repository is its firmware. The Pi:
 - holds the keys and the recovery phrase;
 - decodes every transaction itself, showing the amount and recipient on a 16x2 LCD;
 - lights the backlight green, yellow or red by risk;
-- signs only after a 2-second hold of the right button.
+- signs only after a 2-second hold of the right button;
+- stays encrypted with the password chosen in the app, and locks after a restart or 5 idle minutes;
+- has its own menu (middle button): wallets with the balances the app sent, disconnect the app, erase.
 
 The [Aurora desktop app](https://github.com/blockchain-wallet-hackathon/wallet-software)
 shows your accounts and prepares transactions. It can't move funds without the
@@ -129,7 +131,7 @@ wallet, though the public faucet is often rate-limited (use faucet.solana.com).
 ## Tests
 
 ```sh
-./build/wfw_tests                                         # 86 unit tests
+./build/wfw_tests                                         # 94 unit tests
 python3 tests/integration/test_sim.py build/wallet-fw     # 7 end-to-end tests, PTY + TCP
 cmake -S . -B build-asan -DWFW_SANITIZE=ON                # ASan + UBSan build
 ```
@@ -141,7 +143,8 @@ The unit tests cover:
   (`tests/tools/gen_vectors.js`), checked byte for byte;
 - parser fuzz cases;
 - every Controller flow: setup with the on-device backup check, pairing,
-  signing, the risk colours, PIN and the encrypted channel;
+  signing, the risk colours, the password and PIN, the device menu, erase,
+  and the encrypted channel;
 - the protocol v2 envelope and signed identity, as the desktop app verifies them.
 
 ## Layout
@@ -152,7 +155,7 @@ src/device/             protocol + on-device flows (Controller)
 src/solana/             message parser, instruction recognizer, LCD formatting
 src/policy/             device risk rule
 src/crypto/             BIP-39/SLIP-10 keys, ed25519, HKDF, secure channel
-src/storage/            keystore (optional PIN), known recipients
+src/storage/            keystore (optional password/PIN), known recipients
 src/ui/                 debounce/hold, screen renderer, buzzer
 src/hal/linux|sim/      I2C LCD, libgpiod, serial, systemd; simulator
 tools/                  Python reference host + CLI
@@ -174,6 +177,7 @@ tests/                  unit tests, simulator integration test, vector generator
 ## Security note
 
 A Pi has no secure element, so this is a prototype of the signing flow, not a
-safe place for real funds. The keystore lives on the SD card. The optional PIN
-encrypts it with Argon2id + XSalsa20-Poly1305, but a short PIN can be
-brute-forced by anyone holding the card. Use devnet only.
+safe place for real funds. The keystore lives on the SD card. The app password
+(or the optional PIN) encrypts it with Argon2id + XSalsa20-Poly1305, but a weak
+one can be brute-forced by anyone holding the card. The password crosses the
+cable in plaintext unless the encrypted channel is on. Use devnet only.

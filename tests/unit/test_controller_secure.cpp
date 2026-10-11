@@ -97,6 +97,7 @@ TEST(pin_mismatch_restarts_entry) {
 TEST(pin_lockout_after_max_attempts) {
   Harness h;
   h.preinit(0, "2468");
+  h.cfg.pinEnabled = true;  // PIN entered on the device's buttons
   h.cfg.pinMaxAttempts = 2;
   h.boot();
   h.send(signReq(5));

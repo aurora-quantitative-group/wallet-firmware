@@ -172,7 +172,16 @@ void Controller::setAppDisconnected(bool disconnected) {
 // the 2-second hold. Only the 12 recovery words can bring the wallet back.
 
 void Controller::handleReset(const Ctx& ctx) {
-  if (!checkReadyForPrompt(ctx)) return;
+  // Not checkReadyForPrompt: a wallet locked out by wrong passwords must still
+  // be erasable (the hold on the device confirms it; the words restore funds).
+  if (sessionActive()) {
+    replyError(ctx, err::kBusy, "a device prompt is in progress");
+    return;
+  }
+  if (!s_.screen.healthy()) {
+    replyError(ctx, err::kDisplayUnavailable, "the device display is not responding");
+    return;
+  }
   if (!s_.keystore.initialized() && s_.keystore.status() != storage::Keystore::Status::Error) {
     replyError(ctx, err::kNotInitialized, "there is no wallet to erase");
     return;

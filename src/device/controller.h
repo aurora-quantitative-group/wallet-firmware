@@ -86,6 +86,8 @@ class Controller {
   void handleGetPubkey(const Ctx& ctx);
   void handleCancel(const Ctx& ctx);
   void handleHandshake(const Ctx& ctx, const json& params);
+  void handleUnlock(const Ctx& ctx, const json& params);
+  void handleLock(const Ctx& ctx);
   void handlePair(const Ctx& ctx, const json& params);
   void onPairButton(const ui::ButtonEvent& ev);
   json signedPayload(const json& payload) const;
@@ -101,7 +103,7 @@ class Controller {
   bool holdStartedInSession(const ui::ButtonEvent& ev) const;
 
   // controller_setup.cpp: seed words, backup re-show, PIN entry.
-  void handleSetup(const Ctx& ctx);
+  void handleSetup(const Ctx& ctx, const json& params);
   void handleShowSeed(const Ctx& ctx);
   void showWord();
   void onWordsButton(const ui::ButtonEvent& ev);
@@ -191,6 +193,7 @@ class Controller {
   int pinDigit_ = 0;
   int pinFailures_ = 0;
   std::function<void()> afterUnlock_;
+  std::string setupPassword_;  // from the app's setup, until the wallet is saved
 
   // Transaction review.
   Bytes reviewMessage_;

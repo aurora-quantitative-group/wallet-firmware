@@ -100,7 +100,11 @@ void Controller::dispatch(const json& req, bool encrypted) {
   } else if (name == cmd::kGetPubkey) {
     handleGetPubkey(ctx);
   } else if (name == cmd::kSetup) {
-    handleSetup(ctx);
+    handleSetup(ctx, params);
+  } else if (name == cmd::kUnlock) {
+    handleUnlock(ctx, params);
+  } else if (name == cmd::kLock) {
+    handleLock(ctx);
   } else if (name == cmd::kShowSeed) {
     handleShowSeed(ctx);
   } else if (name == cmd::kPair) {

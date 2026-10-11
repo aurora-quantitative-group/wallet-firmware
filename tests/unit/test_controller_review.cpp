@@ -107,6 +107,7 @@ TEST(review_blind_signing_off_by_default_and_never_learns_recipients) {
 TEST(pin_failures_survive_restart) {
   Harness h;
   h.preinit(0, "2468");
+  h.cfg.pinEnabled = true;
   h.cfg.pinMaxAttempts = 3;
   h.boot();
   h.send(signReq(b64msg(kTransferMsgHex)));
@@ -125,6 +126,7 @@ TEST(pin_failures_survive_restart) {
 TEST(pin_success_resets_counter_and_auto_lock_relocks) {
   Harness h;
   h.preinit(0, "2468");
+  h.cfg.pinEnabled = true;
   h.cfg.autoLockS = 10;
   h.boot();
   std::string err;

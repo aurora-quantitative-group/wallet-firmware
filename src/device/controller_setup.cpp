@@ -27,8 +27,18 @@ constexpr int kLastWord = static_cast<int>(crypto::kMnemonicWords) - 1;
 
 }  // namespace
 
-void Controller::handleSetup(const Ctx& ctx) {
+void Controller::handleSetup(const Ctx& ctx, const json& params) {
   if (!checkReadyForPrompt(ctx)) return;
+  // Optional password chosen in the app: it encrypts the wallet on Aurora.
+  std::string password;
+  if (const auto pw = params.find("password"); pw != params.end()) {
+    if (!pw->is_string() || pw->get_ref<const std::string&>().size() < 8 ||
+        pw->get_ref<const std::string&>().size() > 128) {
+      replyError(ctx, err::kInvalidRequest, "password must be 8-128 characters");
+      return;
+    }
+    password = pw->get<std::string>();
+  }
   switch (s_.keystore.status()) {
     case storage::Keystore::Status::Error:
       replyError(ctx, err::kStorageError, s_.keystore.lastError());
@@ -49,6 +59,7 @@ void Controller::handleSetup(const Ctx& ctx) {
   }
   LOG_INFO("setup: showing new recovery words");
   beginPending(Pending::Setup, ctx, s_.config.setupTimeoutS);
+  setupPassword_.swap(password);
   wordIndex_ = -1;
   showWord();
   s_.buzzer.beep();
@@ -227,7 +238,12 @@ void Controller::finishBackupCheck() {
     showNotice("BACKUP CHECKED", "", ui::colors::kLow, 2500);
     return;
   }
-  if (s_.config.pinEnabled) {
+  if (!setupPassword_.empty()) {
+    std::string password;
+    password.swap(setupPassword_);
+    createWallet(password);
+    wipeString(password);
+  } else if (s_.config.pinEnabled) {
     startPin(PinPurpose::Set);
   } else {
     createWallet("");
@@ -262,6 +278,13 @@ void Controller::createWallet(const std::string& pin) {
 void Controller::requireUnlock(std::function<void()> then) {
   if (s_.keystore.ready()) {
     then();
+    return;
+  }
+  // Password wallets are unlocked from the app; button PINs only when the
+  // device is configured for them (pin_enabled).
+  if (!s_.config.pinEnabled) {
+    finishPendingError(err::kLocked, "unlock Aurora with your password in the app");
+    showIdle();
     return;
   }
   afterUnlock_ = std::move(then);
@@ -383,6 +406,7 @@ void Controller::clearSecrets() {
   newEntropy_.wipe();
   wipeString(pinDigits_);
   wipeString(firstPin_);
+  wipeString(setupPassword_);
   pinDigit_ = 0;
   wordIndex_ = -1;
   quizPositions_.fill(0);

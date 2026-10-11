@@ -50,15 +50,20 @@ signed over the exact payload bytes.
 ```
 
 - **Challenge:** 8–128 characters.
-- **`state`:** `uninitialized`, `ready`, `locked` (PIN on the device) or `error`.
+- **`state`:** `uninitialized`, `ready`, `locked` (needs the app password, or the PIN on the device with `pin_enabled`) or `error`.
+- **`pin_protected`:** the wallet is encrypted with a password or PIN. When `true` and `state` is `locked`, the app asks for the password and sends `unlock`.
 - **Wallets:** SOL comes from SLIP-0010 `m/44'/501'/0'/0'`, the same address on both clusters; only devnet signs. BTC is the BIP-84 `m/84'/0'/0'/0/0` P2WPKH address, for tracking only. It's stored at setup so it's known while locked. Before setup, `wallets` is `[]`.
 
-### `setup {}`: new wallet, backup checked on the device
+### `setup {password?}`: new wallet, backup checked on the device
+
+`password` is optional, 8–128 characters, chosen in the app. Aurora encrypts
+the wallet with it (Argon2id + secretbox) and locks after a restart, after
+`auto_lock_s` idle, or on `lock`. Anything shorter gives `invalid_request`.
 
 1. Aurora draws 128 bits from libsodium and shows the 12 BIP-39 words one per screen (`03/12 ocean`). Middle shows the next word and left goes back. Holding right on word 12 finishes.
 2. **Backup check:** Aurora asks for 3 random positions (`WORD #07? M:NEXT`). For each, the user picks the right word from 4 candidates (middle and left cycle, hold right chooses).
 3. A wrong answer goes back to the words. Nothing is saved until all 3 are right.
-4. With `pin_enabled`, the user then sets a PIN on the device.
+4. Without a password and with `pin_enabled`, the user then sets a PIN on the device.
 5. The wallet is saved, and the result is `{"created":true,"shown":true,"has_seed":true,"backup_confirmed":true,"pubkey":"…","pin_protected":…}`.
 
 The phrase never crosses the serial link. An existing wallet is never replaced
@@ -107,6 +112,38 @@ The app adds the signature, verifies it, and broadcasts.
 - **`cancel`** aborts the waiting prompt. The prompt's request gets `cancelled`, then `cancel` returns `{"cancelled": bool}`.
 - **`get_pubkey`** is an unsigned convenience lookup: `{"pubkey","device_id","name","backup_confirmed","pin_protected","locked"}`.
 
+### `unlock {password}` and `lock {}`
+
+- **`unlock`** decrypts a locked wallet: `{"state":"ready"}`. A wrong password
+  gives `wrong_password` with `attempts_left`; after `pin_max_attempts`
+  (default 5, counted across restarts) every attempt gives `pin_locked`.
+  Unlocking an unprotected or unlocked wallet is a no-op.
+- **`lock`** drops the decrypted keys and cancels any open prompt:
+  `{"locked": bool}` (`false` when the wallet has no password).
+- While locked, `pair`, `sign_tx` and `show_seed` reply `locked` instead of
+  prompting.
+
+The password crosses the cable in plaintext unless the encrypted channel is
+running. It is never stored on the PC; forgetting it means erasing Aurora and
+restoring from the 12 words.
+
+### `balances {wallets}`, `reset {}`
+
+- **`balances`** sends `[{"id":"sol-dev","amount":"1.25","symbol":"SOL"}]`
+  (≤ 20 entries; `amount` ≤ 16 digits with at most one `.`; `symbol` ≤ 6 capital letters) for the
+  device's WALLETS menu: `{"shown": n}`.
+- **`reset`** shows `ERASE WALLET?`, `MOVE FUNDS FIRST`, `HOLD R TO ERASE` in
+  red. All three must be seen, then a hold erases the keys, the recipient list
+  and the balances: `{"erased":true}`. Left keeps the wallet (`rejected`). It
+  works even when locked out by wrong passwords.
+
+### Device menu
+
+Middle on the home screen opens `WALLETS`, `DISCONNECT APP`, `ERASE WALLET`
+and `ABOUT`; the menu closes after 60 s. While the app is disconnected from the
+menu, every command (`ping` too) gets `app_disconnected` until
+`CONNECT APP` is chosen.
+
 ## Error codes
 
 | `code` | `error` text (abridged) |
@@ -119,7 +156,9 @@ The app adds the signature, verifies it, and broadcasts.
 | `display_unavailable` | The screen isn't responding, so nothing can be confirmed |
 | `invalid_message`, `not_signer`, `wrong_wallet` | Transaction problems |
 | `rejected`, `cancelled`, `timeout` | The user said no, the app cancelled, or no answer in time |
-| `pin_locked` | Too many wrong PINs. The counter survives restarts; recover the funds with the 12 words in any BIP-39 wallet. |
+| `locked` / `wrong_password` | Aurora needs the app password / the password was wrong (`attempts_left`) |
+| `app_disconnected` | The app was disconnected from Aurora's menu |
+| `pin_locked` | Too many wrong passwords or PINs. The counter survives restarts; recover the funds with the 12 words in any BIP-39 wallet. |
 | `secure_channel_required`, `no_secure_channel`, `decrypt_failed`, `handshake_failed` | Encrypted-channel errors |
 
 ## Onboarding sequence (app)
@@ -127,7 +166,8 @@ The app adds the signature, verifies it, and broadcasts.
 ```
 every 2 s: ping (signed)  -> verify signature, challenge, protocol == 2
   no reply / no port      -> "No device connected"
-  has_seed = false        -> setup ............ "write the words down on Aurora, then confirm 3 on it"
+  has_seed = false        -> choose password -> setup {password} ... "write the words down on Aurora, then confirm 3 on it"
+  state = locked          -> password screen -> unlock {password}
   has_seed, not paired    -> pair (code shown in the app and on Aurora) -> save link -> dashboard
   paired link matches     -> dashboard (wallets, balances, history, send)
 ```
@@ -168,4 +208,4 @@ PIN-protected wallet relocks after `auto_lock_s` (default 300 s) without a promp
 | Confirm hold | 2 s (`hold_confirm_ms`) |
 | `sign_tx` prompt timeout | 180 s (`review_timeout_s`) |
 | `setup` / `show_seed` timeout | 900 s (`setup_timeout_s`); the app waits 900 s, and 200 s for `pair` / `sign_tx` |
-| PIN unlock (Argon2id) | ~0.5–1 s on a Pi 4 |
+| Password / PIN unlock (Argon2id) | ~0.5–1 s on a Pi 4 |
