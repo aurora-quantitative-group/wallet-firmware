@@ -1,6 +1,10 @@
 #include "hal/linux/tty_serial.h"
 
 #include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -150,6 +154,44 @@ void PtySerial::onClose() {
     keepAliveFd_ = -1;
     ::unlink(linkPath_.c_str());
   }
+}
+
+TcpListenLink::~TcpListenLink() {
+  if (listenFd_ >= 0) ::close(listenFd_);
+}
+
+bool TcpListenLink::open() {
+  if (listenFd_ < 0) {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+    addrinfo* res = nullptr;
+    const std::string port = std::to_string(port_);
+    if (::getaddrinfo(host_.c_str(), port.c_str(), &hints, &res) != 0 || res == nullptr) {
+      LOG_ERROR("tcp: cannot resolve %s", host_.c_str());
+      return false;
+    }
+    const int fd = ::socket(res->ai_family, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    const int one = 1;
+    if (fd >= 0) ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    if (fd < 0 || ::bind(fd, res->ai_addr, res->ai_addrlen) != 0 || ::listen(fd, 1) != 0) {
+      LOG_ERROR("tcp: cannot listen on %s: %s", describe().c_str(), std::strerror(errno));
+      if (fd >= 0) ::close(fd);
+      ::freeaddrinfo(res);
+      return false;
+    }
+    ::freeaddrinfo(res);
+    listenFd_ = fd;
+    LOG_WARN("DEVELOPMENT transport listening on %s (approvals still need the buttons)",
+             describe().c_str());
+  }
+  fd_ = ::accept4(listenFd_, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+  if (fd_ < 0) return false;
+  const int nodelay = 1;
+  ::setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+  LOG_INFO("tcp: client connected");
+  return true;
 }
 
 }  // namespace wfw::hal

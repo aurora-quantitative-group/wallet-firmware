@@ -1,11 +1,12 @@
-// wallet-fw: Solana hardware-wallet firmware for a Raspberry Pi 4B with a
-// Grove 16x2 RGB LCD, three Grove buttons and a Grove buzzer.
+// wallet-fw: firmware for the Aurora hardware wallet - a Raspberry Pi 4B with
+// a Grove 16x2 RGB LCD, three Grove buttons and a Grove buzzer.
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
 #include <unistd.h>
 
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -50,6 +51,7 @@ struct Options {
   bool verbose = false;
   bool wipe = false;
   bool hwTest = false;
+  std::string tcpListen;
 };
 
 void usage() {
@@ -61,6 +63,7 @@ void usage() {
       "  --verbose              debug logging\n"
       "  --wipe                 delete the wallet and known recipients (asks to confirm)\n"
       "  --hw-test              LCD pages / buttons / buzzer check (stop the service first)\n"
+      "  --tcp-listen HOST:PORT DEVELOPMENT ONLY: serve the protocol over TCP, not serial\n"
       "  --version              print the firmware version\n"
       "Simulator (no Pi hardware needed):\n"
       "  --sim                  console LCD, typed button commands, PTY serial port\n"
@@ -92,8 +95,9 @@ bool parseArgs(int argc, char** argv, Options& o) {
     else if (a == "--verbose") o.verbose = true;
     else if (a == "--wipe") o.wipe = true;
     else if (a == "--hw-test") o.hwTest = true;
+    else if (a == "--tcp-listen") ok = value(o.tcpListen);
     else if (a == "--version") {
-      std::cout << "wallet-fw " << WFW_VERSION << " (protocol " << device::kProtocolVersion << ")\n";
+      std::cout << "Aurora firmware (wallet-fw) " << WFW_VERSION << " (protocol " << device::kProtocolVersion << ")\n";
       std::exit(0);
     } else if (a == "--help" || a == "-h") {
       usage();
@@ -183,6 +187,11 @@ int main(int argc, char** argv) {
 
   storage::Keystore keystore(cfg.dataDir);
   if (!keystore.load(err)) LOG_ERROR("keystore: %s", err.c_str());
+  storage::DeviceIdentity identity(cfg.dataDir);
+  if (!identity.loadOrCreate(err)) {
+    LOG_ERROR("device identity: %s", err.c_str());
+    return 1;
+  }
   storage::KnownRecipients recipients(cfg.dataDir);
   if (!recipients.load(err)) LOG_WARN("recipients: %s (starting empty)", err.c_str());
 
@@ -241,13 +250,24 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  if (!opt.tcpListen.empty()) {
+    const auto colon = opt.tcpListen.rfind(':');
+    const int port = colon == std::string::npos ? 0 : std::atoi(opt.tcpListen.c_str() + colon + 1);
+    if (port <= 0 || port > 65535) {
+      LOG_ERROR("--tcp-listen needs HOST:PORT, e.g. 127.0.0.1:7777");
+      return 2;
+    }
+    link = std::make_unique<hal::TcpListenLink>(opt.tcpListen.substr(0, colon), port);
+  }
+
   ui::ButtonInput buttons(cfg.debounceMs, cfg.holdConfirmMs);
   ui::ScreenRenderer screen(*display, clock, cfg.backlightBrightness);
   screen.begin();
   ui::BuzzerController buzzer(*buzzerHw, clock, cfg.buzzerEnabled);
 
   device::Controller controller(
-      device::Services{keystore, recipients, screen, buzzer, buttons, clock, cfg, nullptr},
+      device::Services{keystore, recipients, identity, screen, buzzer, buttons, clock, cfg,
+                       nullptr},
       [&link](const std::string& line) {
         if (!link->isOpen()) return;
         link->queue(line + "\n");
@@ -259,8 +279,9 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, onSignal);
   std::signal(SIGPIPE, SIG_IGN);
 
-  LOG_INFO("wallet-fw %s started (%s, keystore %s)", WFW_VERSION, opt.sim ? "simulator" : "hardware",
-           keystore.initialized() ? keystore.address().c_str() : "empty");
+  LOG_INFO("Aurora firmware %s started (%s, device %s, wallet %s)", WFW_VERSION,
+           opt.sim ? "simulator" : "hardware", identity.deviceId().c_str(),
+           keystore.initialized() ? keystore.address().c_str() : "not set up");
   hal::sdNotify("READY=1");
   const int64_t watchdogMs = hal::sdWatchdogIntervalMs();
   TimeMs lastWatchdog = 0;
@@ -272,7 +293,7 @@ int main(int argc, char** argv) {
   while (!g_stop) {
     TimeMs now = clock.nowMs();
     if (!link->isOpen() && now >= nextOpenAttempt) {
-      if (!link->open()) nextOpenAttempt = now + 1000;
+      if (!link->open()) nextOpenAttempt = now + link->retryMs();
     }
 
     pollfd fds[2];
@@ -316,7 +337,7 @@ int main(int argc, char** argv) {
         link->close();
         framer.reset();
         controller.onLinkReset();
-        nextOpenAttempt = clock.nowMs() + 1000;
+        nextOpenAttempt = clock.nowMs() + link->retryMs();
       }
     }
     if (controlSlot >= 0 && (fds[controlSlot].revents & (POLLIN | POLLHUP))) {

@@ -13,6 +13,8 @@ class SerialLink {
   virtual ~SerialLink();
   virtual bool open() = 0;
   virtual std::string describe() const = 0;
+  // How long to wait before retrying open() after it failed.
+  virtual int retryMs() const { return 1000; }
 
   int fd() const { return fd_; }
   bool isOpen() const { return fd_ >= 0; }
@@ -62,6 +64,24 @@ class PtySerial final : public SerialLink {
   std::string linkPath_;
   std::string slaveName_;
   int keepAliveFd_ = -1;  // our own slave fd keeps the master from seeing HUP
+};
+
+// DEVELOPMENT ONLY: serves the protocol to one TCP client at a time, so the
+// Aurora app (debug build, WALLET_SERIAL_PORT=tcp://host:port) can reach the
+// simulator or a Pi without a USB cable. Anyone who can reach the port can
+// send requests; approving anything still needs the physical buttons.
+class TcpListenLink final : public SerialLink {
+ public:
+  TcpListenLink(std::string host, int port) : host_(std::move(host)), port_(port) {}
+  ~TcpListenLink() override;
+  bool open() override;  // accepts a waiting client, if any
+  std::string describe() const override { return "tcp://" + host_ + ":" + std::to_string(port_); }
+  int retryMs() const override { return 100; }
+
+ private:
+  std::string host_;
+  int port_;
+  int listenFd_ = -1;
 };
 
 }  // namespace wfw::hal

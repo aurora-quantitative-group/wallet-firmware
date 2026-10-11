@@ -1,7 +1,13 @@
-// Seed-word display (setup / show_words) and PIN entry flows.
+// Seed words, the on-device backup check (setup / show_seed) and PIN entry.
 #include <sodium.h>
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
+
+extern "C" {
+#include "bip39.h"
+}
 
 #include "device/controller.h"
 #include "device/protocol.h"
@@ -48,7 +54,9 @@ void Controller::handleSetup(const Ctx& ctx) {
   s_.buzzer.beep();
 }
 
-void Controller::handleShowWords(const Ctx& ctx) {
+// Re-shows the words of a wallet whose backup was never checked, then runs
+// the same on-device check. Once confirmed, the words are never shown again.
+void Controller::handleShowSeed(const Ctx& ctx) {
   if (!checkReadyForPrompt(ctx)) return;
   const auto& ks = s_.keystore;
   if (ks.status() == storage::Keystore::Status::Error) {
@@ -61,10 +69,10 @@ void Controller::handleShowWords(const Ctx& ctx) {
   }
   // Once the backup is confirmed the words never leave storage again.
   if (ks.backupConfirmed()) {
-    replyError(ctx, err::kBackupAlreadyConfirmed, "the recovery words can no longer be shown");
+    replyError(ctx, err::kBackupAlreadyConfirmed);
     return;
   }
-  beginPending(Pending::ShowWords, ctx, s_.config.setupTimeoutS);
+  beginPending(Pending::ShowSeed, ctx, s_.config.setupTimeoutS);
   requireUnlock([this] {
     if (!s_.keystore.mnemonic(mnemonic_)) {
       finishPendingError(err::kInternal, "could not rebuild the recovery words");
@@ -111,15 +119,112 @@ void Controller::onWordsButton(const ui::ButtonEvent& ev) {
     hintUntil_ = s_.clock.nowMs() + 1500;
   } else if (ev.kind == Kind::Hold && ev.button == ui::Button::Right && wordIndex_ == kLastWord &&
              ev.pressedAt >= lastWordShownAt_) {
-    finishWords();
+    startQuiz();
   }
 }
 
-void Controller::finishWords() {
-  mnemonic_.wipe();
-  if (pending_ == Pending::ShowWords) {
-    finishPending({{"ok", true}});
-    showNotice("NOW TYPE THE", "WORDS IN THE APP", ui::colors::kSetup, 3000);
+// ------------------------------------------------- on-device backup check --
+// The user proves the backup on Aurora itself: for 3 random positions they
+// pick the right word out of 4 (M/L cycle, hold R to choose). The phrase
+// never goes to the app. A wrong answer sends them back to the words.
+
+namespace {
+
+void wordAt(const crypto::Mnemonic& m, int position, char (&out)[16]) {
+  std::memset(out, 0, sizeof(out));
+  m.word(static_cast<size_t>(position), out, sizeof(out));
+}
+
+}  // namespace
+
+void Controller::startQuiz() {
+  for (int q = 0; q < kQuizQuestions; ++q) {
+    int pos = 0;
+    do {
+      pos = static_cast<int>(randombytes_uniform(crypto::kMnemonicWords));
+    } while (std::find(quizPositions_.begin(), quizPositions_.begin() + q, pos) !=
+             quizPositions_.begin() + q);
+    quizPositions_[q] = pos;
+  }
+  std::sort(quizPositions_.begin(), quizPositions_.end());
+  quizStep_ = 0;
+  prepareChoices();
+  showQuiz();
+}
+
+void Controller::prepareChoices() {
+  char word[16];
+  wordAt(mnemonic_, quizPositions_[quizStep_], word);
+  const int correct = mnemonic_find_word(word).index;
+  sodium_memzero(word, sizeof(word));
+  quizChoices_[0] = correct;
+  for (int i = 1; i < kQuizChoices; ++i) {
+    int candidate = 0;
+    do {
+      candidate = static_cast<int>(randombytes_uniform(BIP39_WORD_COUNT));
+    } while (std::find(quizChoices_.begin(), quizChoices_.begin() + i, candidate) !=
+             quizChoices_.begin() + i);
+    quizChoices_[i] = candidate;
+  }
+  std::swap(quizChoices_[0], quizChoices_[randombytes_uniform(kQuizChoices)]);
+  quizChoice_ = 0;
+}
+
+void Controller::showQuiz() {
+  mode_ = Mode::Quiz;
+  hint_.clear();
+  sessionStart_ = s_.clock.nowMs();  // a choosing hold must start on this candidate
+  char top[48];
+  char bottom[48];
+  std::snprintf(top, sizeof(top), "WORD #%02d? M:NEXT", quizPositions_[quizStep_] + 1);
+  std::snprintf(bottom, sizeof(bottom), "%-12s%d/%d", mnemonic_get_word(quizChoices_[quizChoice_]),
+                quizChoice_ + 1, kQuizChoices);
+  base_ = {top, bottom, ui::colors::kSetup};
+}
+
+void Controller::onQuizButton(const ui::ButtonEvent& ev) {
+  using Kind = ui::ButtonEvent::Kind;
+  if (ev.kind == Kind::Press && ev.button == ui::Button::Middle) {
+    quizChoice_ = (quizChoice_ + 1) % kQuizChoices;
+    showQuiz();
+  } else if (ev.kind == Kind::Press && ev.button == ui::Button::Left) {
+    quizChoice_ = (quizChoice_ + kQuizChoices - 1) % kQuizChoices;
+    showQuiz();
+  } else if (ev.kind == Kind::Hold && ev.button == ui::Button::Right && holdStartedInSession(ev) &&
+             s_.screen.healthy()) {
+    char word[16];
+    wordAt(mnemonic_, quizPositions_[quizStep_], word);
+    const bool right = std::strcmp(word, mnemonic_get_word(quizChoices_[quizChoice_])) == 0;
+    sodium_memzero(word, sizeof(word));
+    if (!right) {
+      LOG_INFO("backup check: wrong word, showing the words again");
+      wordIndex_ = -1;
+      showWord();
+      hint_ = "WRONG WORD! M:GO";
+      hintUntil_ = s_.clock.nowMs() + 3000;
+      return;
+    }
+    if (++quizStep_ < kQuizQuestions) {
+      prepareChoices();
+      showQuiz();
+      return;
+    }
+    finishBackupCheck();
+  }
+}
+
+void Controller::finishBackupCheck() {
+  LOG_INFO("backup check passed on device");
+  if (pending_ == Pending::ShowSeed) {
+    mnemonic_.wipe();
+    std::string why;
+    if (!s_.keystore.setBackupConfirmed(why)) {
+      finishPendingError(err::kStorageError, why);
+      showNotice("SAVE FAILED", "SEE DEVICE LOGS", ui::colors::kHigh, 4000);
+      return;
+    }
+    finishPending({{"ok", true}, {"shown", true}, {"backup_confirmed", true}});
+    showNotice("BACKUP CHECKED", "", ui::colors::kLow, 2500);
     return;
   }
   if (s_.config.pinEnabled) {
@@ -133,7 +238,7 @@ void Controller::createWallet(const std::string& pin) {
   base_ = {"SAVING WALLET", "PLEASE WAIT", ui::colors::kSetup};
   render();  // Argon2id blocks for a moment; show why
   std::string why;
-  const bool ok = s_.keystore.create(newEntropy_.data(), pin, why);
+  const bool ok = s_.keystore.create(newEntropy_.data(), pin, why, /*backupConfirmed=*/true);
   clearSecrets();
   if (!ok) {
     LOG_ERROR("setup: could not store wallet: %s", why.c_str());
@@ -143,8 +248,11 @@ void Controller::createWallet(const std::string& pin) {
   }
   LOG_INFO("setup: wallet created, address %s", s_.keystore.address().c_str());
   finishPending({{"ok", true},
+                 {"created", true},
+                 {"shown", true},
+                 {"has_seed", true},
+                 {"backup_confirmed", true},
                  {"pubkey", s_.keystore.address()},
-                 {"backup_confirmed", false},
                  {"pin_protected", s_.keystore.pinProtected()}});
   showNotice("WALLET CREATED", abbreviateAddress(s_.keystore.address()), ui::colors::kLow, 3000);
 }
@@ -277,6 +385,12 @@ void Controller::clearSecrets() {
   wipeString(firstPin_);
   pinDigit_ = 0;
   wordIndex_ = -1;
+  quizPositions_.fill(0);
+  quizChoices_.fill(0);
+  quizStep_ = 0;
+  quizChoice_ = 0;
+  pairChallenge_.clear();
+  pairCode_.clear();
   afterUnlock_ = nullptr;
   reviewMessage_.clear();
   pages_.clear();
