@@ -208,7 +208,7 @@ struct Harness {
     return words;
   }
 
-  // Screen "WORD #07? M:NEXT" / "ocean        2/4": cycle to the right word.
+  // Screen "WORD #07? R:NEXT" / "ocean        2/4": cycle to the right word.
   bool answerQuestion(const std::vector<std::string>& words, bool correctly = true) {
     if (top().rfind("WORD #", 0) != 0) return false;
     const std::string want = words.at(std::stoul(top().substr(6, 2)) - 1);

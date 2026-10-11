@@ -26,10 +26,11 @@ struct Config {
   int backlightAddress = -1;  // -1 = probe 0x62 (v4) then 0x30 (v5)
   int backlightBrightness = 100;  // percent; lower it if the Pi browns out
 
-  // Buttons and buzzer on gpiochip0 (BCM numbering).
+  // Buttons and buzzer on gpiochip0 (BCM numbering). Two buttons are enough:
+  // a tap of the right one means "next". A middle button (e.g. 27) is optional.
   std::string gpioChip = "gpiochip0";
   int gpioLeft = 17;
-  int gpioMiddle = 27;
+  int gpioMiddle = -1;
   int gpioRight = 22;
   int gpioBuzzer = 23;
   bool buttonsActiveHigh = true;

@@ -216,7 +216,18 @@ void Controller::onLinkReset() {
   render();
 }
 
-void Controller::onButton(const ui::ButtonEvent& ev) {
+void Controller::onButton(const ui::ButtonEvent& input) {
+  // Two buttons are enough: a short tap of the right button means "next",
+  // like the optional middle button, and holding it for 2 s still confirms.
+  // It is decided on release. The PIN pad keeps right as "digit up".
+  ui::ButtonEvent ev = input;
+  if (mode_ != Mode::Pin && ev.button == ui::Button::Right) {
+    if (ev.kind == ui::ButtonEvent::Kind::Press) return;
+    if (ev.kind == ui::ButtonEvent::Kind::Release && ev.at - ev.pressedAt < s_.buttons.holdMs()) {
+      ev.kind = ui::ButtonEvent::Kind::Press;
+      ev.button = ui::Button::Middle;
+    }
+  }
   switch (mode_) {
     case Mode::Words: onWordsButton(ev); break;
     case Mode::Quiz: onQuizButton(ev); break;
@@ -229,7 +240,7 @@ void Controller::onButton(const ui::ButtonEvent& ev) {
     case Mode::Notice:
       if (ev.kind == ui::ButtonEvent::Kind::Press && !sessionActive()) showIdle();
       break;
-    case Mode::Idle:  // middle opens the device menu
+    case Mode::Idle:  // "next" opens the device menu
       if (ev.kind == ui::ButtonEvent::Kind::Press && ev.button == ui::Button::Middle) openMenu();
       break;
   }
@@ -319,7 +330,7 @@ void Controller::render() {
     out.bottom = hint_;
   } else if (holdMode && s_.buttons.pressed(ui::Button::Right) &&
              s_.buttons.pressedAt(ui::Button::Right) >= sessionStart_ &&
-             s_.clock.nowMs() - s_.buttons.pressedAt(ui::Button::Right) >= 150) {
+             s_.clock.nowMs() - s_.buttons.pressedAt(ui::Button::Right) >= 300) {  // not a tap
     out.bottom = holdBar();
   }
   s_.screen.show(out);

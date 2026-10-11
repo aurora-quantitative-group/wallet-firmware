@@ -25,7 +25,7 @@ Status key:
 | R6 | Pico UART fallback, `/dev/serial0` (S2) | `setup-pi.sh uart`; `serial_device` config; baud table | Same code path as R5 | Impl |
 | R7 | LCD functions clear, print(row, text), setRGB (S3) | `hal::Display` interface + `GroveLcd` (Seeed command set) | Fake display in unit tests | Sim |
 | R8 | 30 ms software debounce (S3) | `ui/button_input.cpp` | `button_bounce_shorter_than_debounce_is_ignored`, `button_press_and_release_after_debounce` | Verified |
-| R9 | Left = back/reject, middle = next/scroll, right = confirm (S3) | `controller_setup.cpp`, `controller_sign.cpp` | `ctrl_setup_*`, `sign_*` tests | Verified |
+| R9 | Left = back/reject, right tap (or optional middle) = next/scroll, right hold = confirm (S3) | `controller_setup.cpp`, `controller_sign.cpp` | `ctrl_setup_*`, `sign_*` tests | Verified |
 | R10 | Approval needs a 2 s right-button hold (S3) | `ButtonInput` Hold event; hold must start after the prompt | `button_hold_fires_once_after_two_seconds`, `sign_hold_that_began_before_the_prompt_never_approves`, `ctrl_hold_must_start_on_last_word` | Verified |
 | R11 | Short beep on a signing request; long tone on high risk (S3) | `BuzzerController::beep/longTone` | `buzzer_pattern_plays_and_stops`, `sign_compromised_app_is_red_and_rejected`, integration test 3 | Verified |
 | R12 | One JSON object per line (S4) | `device/line_framer.cpp`, 8 KiB cap | `framer_*`, integration test 5 | Verified |
@@ -35,14 +35,14 @@ Status key:
 | R16 | `sign_tx`: base64 message + risk → base64 signature or `rejected` (S4) | `controller_sign.cpp` | `sign_*` tests, integration tests 2–4 | Verified |
 | R17 | 128-bit entropy from libsodium `randombytes_buf` (S5) | `Services.randomBytes` default | Code review (tests inject fixed entropy) | Impl |
 | R18 | 12-word BIP-39 via trezor-crypto (S5) | `crypto/keys.cpp` | All official English vectors (`bip39_official_vectors`) | Verified |
-| R19 | One word per screen "03/12 ocean"; middle next, left back, hold right on 12 (S5) | `showWord`, `onWordsButton` | `ctrl_setup_shows_words_and_creates_wallet` | Verified |
+| R19 | One word per screen "03/12 ocean"; right tap next, left back, hold right on 12 (S5) | `showWord`, `onWordsButton` | `ctrl_setup_shows_words_and_creates_wallet` | Verified |
 | R20 | SLIP-0010 ed25519 at m/44'/501'/0'/0', matches Phantom (S5) | `slip10Derive`, `deriveSolanaKeyPair` | SLIP-0010 spec vector 1; address equals bip39 + ed25519-hd-key + web3.js | Verified |
 | R21 | Seed stored on disk; pubkey = device ID; no key → setup (S5) | `storage/keystore.cpp` (entropy, 0600, atomic, integrity check) | `keystore_*` tests, integration restart test | Verified |
 | R22 | Sign message bytes with `crypto_sign_detached`, 64-byte signature (S6) | `crypto::signDetached` | Signature identical to web3.js `tx.sign()` (`sign_matches_web3js_and_verifies`); PyNaCl verify | Verified |
 | R23 | Devnet transfer confirmed in Explorer (S6 "done when") | Firmware side complete; `tools/wallet_cli.py send` submits | `simulateTransaction` (sigVerify) on devnet accepted the device signature (`AccountNotFound`; corrupted control gave `SignatureFailure`). Faucet returned 429, so no funded on-chain confirmation | Blocked (faucet) |
 | R24 | Parse header, account keys, blockhash, instructions; compact-u16 (S7, Reference) | `solana/message.cpp` (legacy + v0, sanitize rules) | `compact_u16_vectors`, `parse_*`, `rejects_malformed_messages` | Verified |
 | R25 | Recognise System transfer (all-zero program ID, u32 2 + u64 lamports LE) (S7) | `solana/analyze.cpp` | `parse_web3js_transfer`, `parse_v0_message` | Verified |
-| R26 | Line 1 "SEND 0.50 SOL", line 2 "TO 7xKX..9fQ2"; middle scrolls the full address (S7) | `buildReviewPages` | `sign_middle_scrolls_full_address_then_red_can_be_approved` | Verified |
+| R26 | Line 1 "SEND 0.50 SOL", line 2 "TO 7xKX..9fQ2"; a right tap scrolls the full address (S7) | `buildReviewPages` | `sign_middle_scrolls_full_address_then_red_can_be_approved` | Verified |
 | R27 | Backlight green / yellow / red by risk (S7) | `colorFor`, `ui::colors` | `sign_*` colour checks, integration tests 2–3 (logged RGB) | Verified |
 | R28 | Unknown instruction → "UNKNOWN TX", red (S7) | `analyze` → `unknown`; risk High | `sign_unknown_program_is_red_and_blind_signing_can_be_disabled`, `review_blind_signing_off_by_default_and_never_learns_recipients` | Verified |
 | R29 | Device rule: stores every recipient signed for; unknown recipient ≥ yellow, red if over the limit, whatever the app says (S7) | `storage/recipients.cpp`, `policy/risk.cpp` | `risk_*` tests, `sign_new_recipient_is_yellow_then_remembered`, `sign_compromised_app_is_red_and_rejected` | Verified |

@@ -44,8 +44,10 @@ bool GpiodIo::open(std::string& err) {
                                                       : GPIOD_LINE_BIAS_PULL_UP);
     gpiod_line_settings_set_direction(out, GPIOD_LINE_DIRECTION_OUTPUT);
     gpiod_line_settings_set_output_value(out, GPIOD_LINE_VALUE_INACTIVE);
-    ok = gpiod_line_config_add_line_settings(lines, pins_.buttons.data(), 3, in) == 0 &&
-         gpiod_line_config_add_line_settings(lines, &pins_.buzzer, 1, out) == 0;
+    const unsigned buzzer = static_cast<unsigned>(pins_.buzzer);
+    ok = (inputs_.empty() ||
+          gpiod_line_config_add_line_settings(lines, inputs_.data(), inputs_.size(), in) == 0) &&
+         (pins_.buzzer < 0 || gpiod_line_config_add_line_settings(lines, &buzzer, 1, out) == 0);
     gpiod_request_config_set_consumer(req, kConsumer);
   }
   if (ok) impl_->request = gpiod_chip_request_lines(impl_->chip, req, lines);
@@ -58,22 +60,25 @@ bool GpiodIo::open(std::string& err) {
   return ok;
 }
 
-bool GpiodIo::read(std::array<bool, 3>& pressed) {
+bool GpiodIo::readAll(std::vector<bool>& pressed) {
   if (!impl_ || !impl_->request) return false;
-  gpiod_line_value values[3];
-  if (gpiod_line_request_get_values_subset(impl_->request, 3, pins_.buttons.data(), values) != 0) {
+  std::vector<gpiod_line_value> values(inputs_.size());
+  if (!inputs_.empty() && gpiod_line_request_get_values_subset(impl_->request, inputs_.size(),
+                                                               inputs_.data(), values.data()) != 0) {
     return false;
   }
-  for (size_t i = 0; i < 3; ++i) {
-    const bool high = values[i] == GPIOD_LINE_VALUE_ACTIVE;
+  pressed.assign(pins_.buttons.size(), false);
+  for (size_t i = 0, line = 0; i < pins_.buttons.size(); ++i) {
+    if (pins_.buttons[i] < 0) continue;
+    const bool high = values[line++] == GPIOD_LINE_VALUE_ACTIVE;
     pressed[i] = pins_.activeHigh ? high : !high;
   }
   return true;
 }
 
 void GpiodIo::set(bool on) {
-  if (!impl_ || !impl_->request) return;
-  gpiod_line_request_set_value(impl_->request, pins_.buzzer,
+  if (!impl_ || !impl_->request || pins_.buzzer < 0) return;
+  gpiod_line_request_set_value(impl_->request, static_cast<unsigned>(pins_.buzzer),
                                on ? GPIOD_LINE_VALUE_ACTIVE : GPIOD_LINE_VALUE_INACTIVE);
 }
 
@@ -99,7 +104,7 @@ bool GpiodIo::open(std::string& err) {
     err = "gpiod: open " + pins_.chip + ": " + std::strerror(errno);
     return false;
   }
-  if (gpiod_chip_get_lines(impl_->chip, pins_.buttons.data(), 3, &impl_->buttons) != 0) {
+  if (gpiod_chip_get_lines(impl_->chip, inputs_.data(), static_cast<unsigned>(inputs_.size()), &impl_->buttons) != 0) {
     err = std::string("gpiod: get button lines: ") + std::strerror(errno);
     return false;
   }
@@ -110,7 +115,8 @@ bool GpiodIo::open(std::string& err) {
     return false;
   }
   impl_->buttonsRequested = true;
-  gpiod_line* buzzer = gpiod_chip_get_line(impl_->chip, pins_.buzzer);
+  if (pins_.buzzer < 0) return true;
+  gpiod_line* buzzer = gpiod_chip_get_line(impl_->chip, static_cast<unsigned>(pins_.buzzer));
   if (!buzzer || gpiod_line_request_output(buzzer, kConsumer, 0) != 0) {
     err = std::string("gpiod: request buzzer: ") + std::strerror(errno);
     return false;
@@ -119,12 +125,15 @@ bool GpiodIo::open(std::string& err) {
   return true;
 }
 
-bool GpiodIo::read(std::array<bool, 3>& pressed) {
+bool GpiodIo::readAll(std::vector<bool>& pressed) {
   if (!impl_ || !impl_->buttonsRequested) return false;
-  int values[3] = {0, 0, 0};
-  if (gpiod_line_get_value_bulk(&impl_->buttons, values) != 0) return false;
-  for (size_t i = 0; i < 3; ++i) {
-    pressed[i] = pins_.activeHigh ? values[i] == 1 : values[i] == 0;
+  std::vector<int> values(inputs_.size(), 0);
+  if (gpiod_line_get_value_bulk(&impl_->buttons, values.data()) != 0) return false;
+  pressed.assign(pins_.buttons.size(), false);
+  for (size_t i = 0, line = 0; i < pins_.buttons.size(); ++i) {
+    if (pins_.buttons[i] < 0) continue;
+    const int v = values[line++];
+    pressed[i] = pins_.activeHigh ? v == 1 : v == 0;
   }
   return true;
 }
@@ -135,10 +144,21 @@ void GpiodIo::set(bool on) {
 
 #endif
 
-GpiodIo::GpiodIo(Pins pins) : pins_(std::move(pins)) {}
+GpiodIo::GpiodIo(Pins pins) : pins_(std::move(pins)) {
+  for (int pin : pins_.buttons) {
+    if (pin >= 0) inputs_.push_back(static_cast<unsigned>(pin));
+  }
+}
 
 GpiodIo::~GpiodIo() {
   if (impl_) set(false);
+}
+
+bool GpiodIo::read(std::array<bool, 3>& pressed) {
+  std::vector<bool> all;
+  if (!readAll(all)) return false;
+  for (size_t i = 0; i < pressed.size(); ++i) pressed[i] = i < all.size() && all[i];
+  return true;
 }
 
 }  // namespace wfw::hal

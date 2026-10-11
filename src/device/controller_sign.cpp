@@ -179,7 +179,7 @@ void Controller::buildReviewPages(const solana::TxSummary& tx) {
   pages_.push_back({std::string("RISK: ") + policy::toLabel(risk_.level), risk_.reason,
                     risk_.level > policy::RiskLevel::Low});
   pages_.push_back(blindOnly_ ? Page{"CANNOT SIGN", "L: REJECT", false}
-                              : Page{"HOLD R TO SIGN", "L:REJECT M:NEXT", false});
+                              : Page{"HOLD R TO SIGN", "L:REJECT R:NEXT", false});
 }
 
 void Controller::startReview() {
@@ -217,7 +217,7 @@ void Controller::onReviewButton(const ui::ButtonEvent& ev) {
       blocker = "CANNOT SIGN";
     } else {
       for (size_t i = 0; i < pages_.size(); ++i) {
-        if (pages_[i].required && !seen_[i]) blocker = "M: SEE ALL PAGES";
+        if (pages_[i].required && !seen_[i]) blocker = "R: SEE ALL PAGES";
       }
     }
     if (!blocker.empty()) {

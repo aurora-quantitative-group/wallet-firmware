@@ -2,6 +2,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -16,11 +17,43 @@ namespace wfw {
 
 namespace {
 
-void showPage(hal::GroveLcd& lcd, int page) {
+// The GPIOs on the Grove Base HAT's digital ports (D5, D16, D18, D22, D24,
+// D26) and PWM port (12/13); every port carries two. I2C and UART pins are
+// left alone so the LCD keeps working.
+const std::vector<int> kCandidates = {5, 6, 12, 13, 16, 17, 18, 19, 22, 23, 24, 25, 26, 27};
+
+void show(hal::GroveLcd& lcd, const std::string& top, const std::string& bottom) {
   lcd.clear();
-  lcd.print(0, "Page " + std::to_string(page));
-  lcd.print(1, "M: next page");
-  std::printf("Page %d\n", page);
+  lcd.print(0, top);
+  lcd.print(1, bottom);
+  std::printf("LCD: %s | %s\n", top.c_str(), bottom.c_str());
+  std::fflush(stdout);
+}
+
+// Waits until one line that is not in `skip` stays pressed for 50 ms and is
+// released again; returns its GPIO number (-1 when stopped).
+int waitForButton(hal::GpiodIo& gpio, const std::vector<int>& pins, const std::vector<int>& skip,
+                  volatile std::sig_atomic_t& stop) {
+  SteadyClock clock;
+  std::vector<bool> raw;
+  int candidate = -1;
+  TimeMs since = 0;
+  while (!stop) {
+    ::usleep(5000);
+    if (!gpio.readAll(raw)) continue;
+    int down = -1;
+    for (size_t i = 0; i < pins.size() && down < 0; ++i) {
+      if (raw[i] && std::find(skip.begin(), skip.end(), pins[i]) == skip.end()) down = static_cast<int>(i);
+    }
+    if (down != candidate) {
+      candidate = down;
+      since = clock.nowMs();
+    } else if (down >= 0 && clock.nowMs() - since >= 50) {
+      while (!stop && gpio.readAll(raw) && raw[static_cast<size_t>(down)]) ::usleep(5000);
+      return pins[static_cast<size_t>(down)];
+    }
+  }
+  return -1;
 }
 
 }  // namespace
@@ -36,51 +69,75 @@ int runHardwareTest(const Config& cfg, volatile std::sig_atomic_t& stop) {
   lcd.setRGB(255, 255, 255);
   std::printf("LCD: OK (if the backlight is on but no text shows, the LCD needs 5 V)\n");
 
-  hal::GpiodIo gpio({cfg.gpioChip,
-                     {static_cast<unsigned>(cfg.gpioLeft), static_cast<unsigned>(cfg.gpioMiddle),
-                      static_cast<unsigned>(cfg.gpioRight)},
-                     static_cast<unsigned>(cfg.gpioBuzzer),
-                     cfg.buttonsActiveHigh});
+  std::vector<int> pins;
+  for (int pin : kCandidates) {
+    if (pin != cfg.gpioBuzzer) pins.push_back(pin);
+  }
+  hal::GpiodIo gpio({cfg.gpioChip, pins, cfg.gpioBuzzer, cfg.buttonsActiveHigh});
   std::string err;
-  const bool haveGpio = gpio.open(err);
-  if (!haveGpio) {
-    std::printf("GPIO: %s (is the wallet-fw service still running?)\n", err.c_str());
+  if (!gpio.open(err)) {
+    std::printf("GPIO: %s (stop the service first: sudo systemctl stop wallet-fw)\n", err.c_str());
+    return 1;
+  }
+  // A line that already reads "pressed" with nothing touched is not a button.
+  std::vector<int> skip;
+  std::vector<bool> raw;
+  ::usleep(20000);
+  if (gpio.readAll(raw)) {
+    for (size_t i = 0; i < pins.size(); ++i) {
+      if (raw[i]) skip.push_back(pins[i]);
+    }
+  }
+  for (int pin : skip) std::printf("GPIO %d reads pressed at rest; ignoring it\n", pin);
+
+  show(lcd, "BUTTON FINDER", "PRESS LEFT BTN");
+  const int left = waitForButton(gpio, pins, skip, stop);
+  if (left < 0) return 0;
+  skip.push_back(left);
+  show(lcd, "LEFT: GPIO " + std::to_string(left), "PRESS RIGHT BTN");
+  const int right = waitForButton(gpio, pins, skip, stop);
+  if (right < 0) return 0;
+  std::printf("\nYour buttons: left GPIO %d, right GPIO %d.\n", left, right);
+  if (left == cfg.gpioLeft && right == cfg.gpioRight) {
+    std::printf("They match the config. Nothing to change.\n");
   } else {
-    std::printf("GPIO: buttons on %d/%d/%d, buzzer on %d. Press buttons; Ctrl+C to quit.\n",
-                cfg.gpioLeft, cfg.gpioMiddle, cfg.gpioRight, cfg.gpioBuzzer);
+    std::printf("Put these lines in /etc/wallet-fw/config.json, then restart wallet-fw:\n"
+                "  \"gpio_left\": %d,\n  \"gpio_right\": %d,\n  \"gpio_middle\": -1,\n",
+                left, right);
   }
 
-  int page = 1;
-  showPage(lcd, page);
+  // Practice with the two-button layout: tap right for next, hold to confirm.
+  const size_t li = static_cast<size_t>(std::find(pins.begin(), pins.end(), left) - pins.begin());
+  const size_t ri = static_cast<size_t>(std::find(pins.begin(), pins.end(), right) - pins.begin());
   SteadyClock clock;
   ui::ButtonInput input(cfg.debounceMs, cfg.holdConfirmMs);
   std::vector<ui::ButtonEvent> events;
-  static const char* const kNames[] = {"left", "middle", "right"};
+  int page = 1;
   TimeMs buzzerOffAt = 0;
-
+  show(lcd, "TAP R: NEXT", "HOLD R: BEEP");
   while (!stop) {
-    std::array<bool, 3> raw{};
-    if (haveGpio && gpio.read(raw)) {
-      events.clear();
-      input.update(raw, clock.nowMs(), events);
-      for (const auto& ev : events) {
-        if (ev.kind != ui::ButtonEvent::Kind::Press) continue;
-        std::printf("button: %s\n", kNames[static_cast<int>(ev.button)]);
-        if (ev.button == ui::Button::Middle) {
-          page = page % 3 + 1;  // Page 1 -> 2 -> 3 -> 1, like the Arduino example
-          showPage(lcd, page);
-        } else if (ev.button == ui::Button::Right) {
-          gpio.set(true);
-          buzzerOffAt = clock.nowMs() + 150;
-        }
-      }
-    }
+    ::usleep(5000);
     if (buzzerOffAt != 0 && clock.nowMs() >= buzzerOffAt) {
       gpio.set(false);
       buzzerOffAt = 0;
     }
-    std::fflush(stdout);
-    ::usleep(5000);
+    if (!gpio.readAll(raw)) continue;
+    events.clear();
+    input.update({raw[li], false, raw[ri]}, clock.nowMs(), events);
+    for (const auto& ev : events) {
+      using Kind = ui::ButtonEvent::Kind;
+      if (ev.button == ui::Button::Left && ev.kind == Kind::Press) {
+        show(lcd, "LEFT: BACK", "TAP R: NEXT");
+      } else if (ev.button == ui::Button::Right && ev.kind == Kind::Hold) {
+        show(lcd, "HOLD: CONFIRMED", "BEEP");
+        gpio.set(true);
+        buzzerOffAt = clock.nowMs() + 300;
+      } else if (ev.button == ui::Button::Right && ev.kind == Kind::Release &&
+                 ev.at - ev.pressedAt < input.holdMs()) {
+        page = page % 3 + 1;
+        show(lcd, "PAGE " + std::to_string(page), "HOLD R: BEEP");
+      }
+    }
   }
   lcd.clear();
   lcd.setRGB(0, 0, 0);

@@ -219,7 +219,7 @@ void Controller::onEraseButton(const ui::ButtonEvent& ev) {
              s_.screen.healthy()) {
     for (size_t i = 0; i < pages_.size(); ++i) {
       if (pages_[i].required && !seen_[i]) {
-        hint_ = "M: SEE ALL PAGES";
+        hint_ = "R: SEE ALL PAGES";
         hintUntil_ = s_.clock.nowMs() + 1500;
         return;
       }

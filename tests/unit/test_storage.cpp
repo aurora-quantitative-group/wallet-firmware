@@ -136,7 +136,8 @@ TEST(config_parsing_and_validation) {
   Config cfg;
   std::string err;
   REQUIRE(applyConfigJson(R"({"serial_device": "/dev/serial0", "hold_confirm_ms": 1500,
-      "risk_limit_lamports": 250000000, "pin_enabled": true, "unknown_key": 1})", cfg, err));
+      "risk_limit_lamports": 250000000, "pin_enabled": true, "gpio_middle": 27,
+      "unknown_key": 1})", cfg, err));
   CHECK_EQ(cfg.serialDevice, std::string("/dev/serial0"));
   CHECK_EQ(cfg.holdConfirmMs, 1500);
   CHECK_EQ(cfg.riskLimitLamports, uint64_t{250000000});
@@ -144,6 +145,10 @@ TEST(config_parsing_and_validation) {
   CHECK(!applyConfigJson(R"({"debounce_ms": 1})", cfg, err));
   CHECK(!applyConfigJson(R"({"gpio_left": 22})", cfg, err));  // clashes with right
   CHECK(!applyConfigJson(R"({"pin_enabled": "yes"})", cfg, err));
+  // Two buttons by default; the on-device PIN pad needs a third.
+  CHECK(!applyConfigJson(R"({"gpio_middle": -1})", cfg, err));
+  CHECK(applyConfigJson(R"({"gpio_middle": -1, "pin_enabled": false})", cfg, err));
+  CHECK_EQ(cfg.gpioMiddle, -1);
   CHECK(!applyConfigJson("[1,2]", cfg, err));
   CHECK_EQ(cfg.holdConfirmMs, 1500);  // failed loads leave cfg untouched
   CHECK(loadConfigFile("/nonexistent/config.json", cfg, true, err));

@@ -102,7 +102,7 @@ TEST(menu_erase_needs_every_warning_and_the_hold) {
   CHECK_EQ(h.top(), std::string("ERASE WALLET?"));
   CHECK(h.colorIs(ui::colors::kHigh));
   h.hold(Button::Right);
-  CHECK_EQ(h.bottom(), std::string("M: SEE ALL PAGES"));
+  CHECK_EQ(h.bottom(), std::string("R: SEE ALL PAGES"));
   CHECK(h.keystore->initialized());
   h.click(Button::Middle);
   CHECK_EQ(h.top(), std::string("MOVE FUNDS FIRST"));
@@ -114,6 +114,39 @@ TEST(menu_erase_needs_every_warning_and_the_hold) {
   CHECK_EQ(h.recipients->size(), size_t{0});
   CHECK(h.out.empty());  // nothing to answer: started on the device
   CHECK_EQ(json::parse(h.send({{"cmd", "ping"}})["payload"].get<std::string>())["has_seed"], false);
+}
+
+TEST(two_buttons_reach_every_screen) {
+  Harness h;
+  h.boot();
+  CHECK(h.send({{"id", 1}, {"cmd", "setup"}}).is_null());
+  CHECK_EQ(h.bottom(), std::string("12 WORDS   R:GO"));
+  h.click(Button::Right);  // a tap of right is "next"
+  CHECK_EQ(h.top(), std::string("01/12 abandon"));
+  h.clicks(Button::Right, 11);
+  CHECK_EQ(h.top(), std::string("12/12 about"));
+  h.click(Button::Left);
+  CHECK_EQ(h.top(), std::string("11/12 abandon"));
+  h.click(Button::Right);
+  h.hold(Button::Right);  // the hold still confirms, without also counting as a tap
+  CHECK(h.top().rfind("WORD #", 0) == 0);
+  std::vector<std::string> words(11, "abandon");
+  words.push_back("about");
+  h.passQuiz(words);
+  CHECK_EQ(h.out.back()["backup_confirmed"], true);
+
+  h.run(3000);
+  h.click(Button::Right);  // home screen: tap opens the menu
+  CHECK(h.top().rfind("MENU 1/", 0) == 0);
+  h.click(Button::Right);
+  CHECK(h.top().rfind("MENU 2/", 0) == 0);
+  h.click(Button::Left);
+  CHECK(h.top().rfind("Aurora", 0) == 0);
+
+  h.send({{"id", 2}, {"cmd", "reset"}});
+  h.clicks(Button::Right, 2);
+  CHECK_EQ(h.top(), std::string("HOLD R TO ERASE"));
+  CHECK_EQ(h.hold(Button::Right)["erased"], true);
 }
 
 TEST(app_reset_is_confirmed_or_rejected_on_the_device) {

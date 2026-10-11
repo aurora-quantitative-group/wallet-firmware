@@ -65,7 +65,7 @@ void usage() {
       "  --data-dir PATH        wallet storage directory (default /var/lib/wallet-fw)\n"
       "  --verbose              debug logging\n"
       "  --wipe                 delete the wallet and known recipients (asks to confirm)\n"
-      "  --hw-test              LCD pages / buttons / buzzer check (stop the service first)\n"
+      "  --hw-test              LCD check, button finder, buzzer (stop the service first)\n"
       "  --tcp-listen HOST:PORT DEVELOPMENT ONLY: serve the protocol over TCP, not serial\n"
       "  --mirror-display       also print every LCD screen here (shows recovery words!)\n"
       "  --key-control FIFO     DEVELOPMENT ONLY: also accept l/m/r/h presses written to FIFO\n"
@@ -248,11 +248,8 @@ int main(int argc, char** argv) {
       mirror = std::make_unique<hal::SimDisplay>(clock, "", true);
       display = std::make_unique<hal::MirrorDisplay>(*realLcd, *mirror);
     }
-    hal::GpiodIo::Pins pins{cfg.gpioChip,
-                            {static_cast<unsigned>(cfg.gpioLeft), static_cast<unsigned>(cfg.gpioMiddle),
-                             static_cast<unsigned>(cfg.gpioRight)},
-                            static_cast<unsigned>(cfg.gpioBuzzer),
-                            cfg.buttonsActiveHigh};
+    hal::GpiodIo::Pins pins{cfg.gpioChip, {cfg.gpioLeft, cfg.gpioMiddle, cfg.gpioRight},
+                            cfg.gpioBuzzer, cfg.buttonsActiveHigh};
     auto gpio = std::make_unique<hal::GpiodIo>(pins);
     if (!gpio->open(err)) {
       LOG_ERROR("%s", err.c_str());

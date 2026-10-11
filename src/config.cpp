@@ -73,7 +73,7 @@ const std::map<std::string, Setter>& setters() {
       {"backlight_brightness", integer(&Config::backlightBrightness, 0, 100)},
       {"gpio_chip", str(&Config::gpioChip)},
       {"gpio_left", integer(&Config::gpioLeft, 0, 53)},
-      {"gpio_middle", integer(&Config::gpioMiddle, 0, 53)},
+      {"gpio_middle", integer(&Config::gpioMiddle, -1, 53)},  // -1: two buttons
       {"gpio_right", integer(&Config::gpioRight, 0, 53)},
       {"gpio_buzzer", integer(&Config::gpioBuzzer, 0, 53)},
       {"buttons_active_high", boolean(&Config::buttonsActiveHigh)},
@@ -118,11 +118,15 @@ bool applyConfigJson(const std::string& text, Config& cfg, std::string& err) {
   const int pins[] = {next.gpioLeft, next.gpioMiddle, next.gpioRight, next.gpioBuzzer};
   for (int i = 0; i < 4; ++i) {
     for (int j = i + 1; j < 4; ++j) {
-      if (pins[i] == pins[j]) {
+      if (pins[i] >= 0 && pins[i] == pins[j]) {
         err = "config: two functions share GPIO " + std::to_string(pins[i]);
         return false;
       }
     }
+  }
+  if (next.pinEnabled && next.gpioMiddle < 0) {
+    err = "config: pin_enabled needs a middle button (gpio_middle); use the app password";
+    return false;
   }
   cfg = next;
   return true;

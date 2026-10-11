@@ -49,7 +49,7 @@ TEST(sign_new_recipient_is_yellow_then_remembered) {
   CHECK(h.colorIs(kMedium));
   // A first-time recipient: full address and risk page must be read first.
   CHECK(h.hold(Button::Right).is_null());
-  CHECK_EQ(h.bottom(), std::string("M: SEE ALL PAGES"));
+  CHECK_EQ(h.bottom(), std::string("R: SEE ALL PAGES"));
   h.clicks(Button::Middle, 3);
   CHECK_EQ(h.top(), std::string("RISK: MEDIUM"));
   json r = h.hold(Button::Right);
@@ -81,7 +81,7 @@ TEST(sign_compromised_app_is_red_and_rejected) {
 
   // Red needs the risk page to be seen before a hold can approve.
   CHECK(h.hold(Button::Right).is_null());
-  CHECK_EQ(h.bottom(), std::string("M: SEE ALL PAGES"));
+  CHECK_EQ(h.bottom(), std::string("R: SEE ALL PAGES"));
   const json r = h.click(Button::Left);
   CHECK_EQ(r["ok"], false);
   CHECK_EQ(r["error"], "rejected");

@@ -102,15 +102,15 @@ void Controller::showWord() {
   hint_.clear();
   lastWordShownAt_ = s_.clock.nowMs();
   if (wordIndex_ < 0) {
-    base_ = {"WRITE DOWN THE", "12 WORDS   M:GO", ui::colors::kSetup};
+    base_ = {"WRITE DOWN THE", "12 WORDS   R:GO", ui::colors::kSetup};
     return;
   }
   char word[16] = {0};
   char top[32] = {0};
   mnemonic_.word(static_cast<size_t>(wordIndex_), word, sizeof(word));
   std::snprintf(top, sizeof(top), "%02d/%02zu %s", wordIndex_ + 1, mnemonic_.wordCount(), word);
-  const char* bottom = wordIndex_ == 0          ? "M:NEXT"
-                       : wordIndex_ < kLastWord ? "L:BACK  M:NEXT"
+  const char* bottom = wordIndex_ == 0          ? "R:NEXT"
+                       : wordIndex_ < kLastWord ? "L:BACK  R:NEXT"
                                                 : "L:BACK HOLD R:OK";
   base_ = {top, bottom, ui::colors::kSetup};
   sodium_memzero(word, sizeof(word));
@@ -125,9 +125,6 @@ void Controller::onWordsButton(const ui::ButtonEvent& ev) {
   } else if (ev.kind == Kind::Press && ev.button == ui::Button::Middle && wordIndex_ < kLastWord) {
     ++wordIndex_;
     showWord();
-  } else if (ev.kind == Kind::Press && ev.button == ui::Button::Right && wordIndex_ < kLastWord) {
-    hint_ = "GO TO WORD 12";
-    hintUntil_ = s_.clock.nowMs() + 1500;
   } else if (ev.kind == Kind::Hold && ev.button == ui::Button::Right && wordIndex_ == kLastWord &&
              ev.pressedAt >= lastWordShownAt_) {
     startQuiz();
@@ -187,7 +184,7 @@ void Controller::showQuiz() {
   sessionStart_ = s_.clock.nowMs();  // a choosing hold must start on this candidate
   char top[48];
   char bottom[48];
-  std::snprintf(top, sizeof(top), "WORD #%02d? M:NEXT", quizPositions_[quizStep_] + 1);
+  std::snprintf(top, sizeof(top), "WORD #%02d? R:NEXT", quizPositions_[quizStep_] + 1);
   std::snprintf(bottom, sizeof(bottom), "%-12s%d/%d", mnemonic_get_word(quizChoices_[quizChoice_]),
                 quizChoice_ + 1, kQuizChoices);
   base_ = {top, bottom, ui::colors::kSetup};
@@ -211,7 +208,7 @@ void Controller::onQuizButton(const ui::ButtonEvent& ev) {
       LOG_INFO("backup check: wrong word, showing the words again");
       wordIndex_ = -1;
       showWord();
-      hint_ = "WRONG WORD! M:GO";
+      hint_ = "WRONG WORD! R:GO";
       hintUntil_ = s_.clock.nowMs() + 3000;
       return;
     }

@@ -47,7 +47,7 @@ TEST(ctrl_setup_shows_words_and_creates_wallet) {
 
   h.click(Button::Middle);
   CHECK_EQ(h.top(), std::string("01/12 abandon"));
-  CHECK_EQ(h.bottom(), std::string("M:NEXT"));
+  CHECK_EQ(h.bottom(), std::string("R:NEXT"));
   h.click(Button::Middle);
   CHECK_EQ(h.top(), std::string("02/12 abandon"));
   h.click(Button::Left);
@@ -119,7 +119,7 @@ TEST(ctrl_backup_is_checked_on_the_device) {
   // A wrong word sends the user back to the words; nothing is saved.
   REQUIRE(h.answerQuestion(words, /*correctly=*/false));
   CHECK_EQ(h.top(), std::string("WRITE DOWN THE"));
-  CHECK_EQ(h.bottom(), std::string("WRONG WORD! M:GO"));
+  CHECK_EQ(h.bottom(), std::string("WRONG WORD! R:GO"));
   CHECK(!h.keystore->initialized());
   CHECK(h.out.empty());
   CHECK_EQ(h.readWordsAndConfirm(), std::string(kAbandonMnemonic));

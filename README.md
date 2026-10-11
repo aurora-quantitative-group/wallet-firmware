@@ -7,7 +7,7 @@ Raspberry Pi 4B, and this repository is its firmware. The Pi:
 - lights the backlight green, yellow or red by risk;
 - signs only after a 2-second hold of the right button;
 - stays encrypted with the password chosen in the app, and locks after a restart or 5 idle minutes;
-- has its own menu (middle button): wallets with the balances the app sent, disconnect the app, erase.
+- has its own menu (tap right on the home screen): wallets with the balances the app sent, disconnect the app, erase.
 
 The [Aurora desktop app](https://github.com/blockchain-wallet-hackathon/wallet-software)
 shows your accounts and prepares transactions. It can't move funds without the
@@ -24,12 +24,21 @@ read-only.
 |---|---|
 | Grove LCD RGB Backlight | GND → pin 6, VCC → pin 2 (5 V), SDA → pin 3 (GPIO2), SCL → pin 5 (GPIO3) |
 | Button left (back / reject) | signal → GPIO17, VCC → pin 1 (**3.3 V**), GND → any ground |
-| Button middle (next / scroll) | signal → GPIO27, 3.3 V, GND |
-| Button right (confirm, hold 2 s) | signal → GPIO22, 3.3 V, GND |
+| Button right (tap: next, hold 2 s: confirm) | signal → GPIO22, 3.3 V, GND |
+| Optional middle button (next) | signal → GPIO27; set `"gpio_middle": 27` |
 | Grove Buzzer | signal → GPIO23, 3.3 V, GND |
 | Laptop link | Pi USB-C → powered hub → laptop (USB gadget serial) |
 
 > **Never power the buttons from 5 V.** Pi GPIO pins are not 5 V tolerant.
+
+**Two buttons are enough.** Left goes back or rejects. A quick tap of right
+shows the next page, word or menu item; holding right for 2 s approves. On a
+Grove Base HAT, find which GPIO each button is on with the button finder:
+
+```sh
+sudo systemctl stop wallet-fw
+sudo wallet-fw --hw-test     # press left, then right; it prints the config lines
+```
 
 Pin numbers, I2C addresses, timings and the risk limit can all be changed in
 `/etc/wallet-fw/config.json` ([example](deploy/config.example.json)).
@@ -91,7 +100,8 @@ The LCD is drawn in the terminal and the serial port appears at
 
 | Command | Effect |
 |---|---|
-| `l` / `m` / `r` | Click left / middle / right |
+| `l` / `r` | Click left / tap right ("next") |
+| `m` | Click the optional middle button (also "next") |
 | `h` | Hold right for 2.5 s |
 | `hold r 3000` | Hold a button for a given time in ms |
 
@@ -100,13 +110,13 @@ In another terminal:
 ```sh
 pip install pyserial pynacl
 python3 tools/wallet_cli.py --port ./wallet-fw.pty ping     # verified identity + wallets
-python3 tools/wallet_cli.py --port ./wallet-fw.pty setup    # m ×12, h, then answer 3 words
+python3 tools/wallet_cli.py --port ./wallet-fw.pty setup    # r ×12, h, then answer 3 words
 python3 tools/wallet_cli.py --port ./wallet-fw.pty pair     # check the code, then h
 python3 tools/wallet_cli.py --port ./wallet-fw.pty send --to <ADDR> --sol 0.5 --offline
 ```
 
 Setup ends with a backup check on the device: Aurora asks for 3 of the words
-(`WORD #07? M:NEXT`). Press `m` until the right word shows, then `h`. The
+(`WORD #07? R:NEXT`). Press `r` until the right word shows, then `h`. The
 recovery phrase never leaves Aurora.
 
 ### With the Aurora desktop app
@@ -167,6 +177,7 @@ tests/                  unit tests, simulator integration test, vector generator
 
 | Symptom | Fix |
 |---|---|
+| Buttons do nothing | Run the button finder (`--hw-test`) and put its `gpio_left` / `gpio_right` in `/etc/wallet-fw/config.json`. |
 | Nothing in `i2cdetect` | Check the wiring (SDA pin 3, SCL pin 5, 5 V on pin 2), not the code. |
 | LCD text works but no colour | The backlight chip is at 0x30 or 0x62; set `backlight_address` explicitly. |
 | Pi reboots when the backlight turns on | Lower `backlight_brightness` or use a stronger hub. |

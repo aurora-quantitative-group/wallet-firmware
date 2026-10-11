@@ -6,7 +6,7 @@ One single-threaded C++17 process (`wallet-fw`) runs under systemd on Pi OS
 Lite. A `poll()` loop wakes every 5 ms. In each iteration it:
 
 1. reads the serial port and splits it into JSON lines;
-2. samples the three buttons and debounces them;
+2. samples the two buttons (an optional third) and debounces them; a tap of right means "next", a 2 s hold confirms;
 3. hands lines and button events to the **Controller**;
 4. lets the Controller run its timers (prompt timeouts, notices, buzzer patterns, display retry);
 5. pings the systemd watchdog.

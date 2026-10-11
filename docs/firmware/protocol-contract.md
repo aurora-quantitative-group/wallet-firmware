@@ -60,8 +60,8 @@ signed over the exact payload bytes.
 the wallet with it (Argon2id + secretbox) and locks after a restart, after
 `auto_lock_s` idle, or on `lock`. Anything shorter gives `invalid_request`.
 
-1. Aurora draws 128 bits from libsodium and shows the 12 BIP-39 words one per screen (`03/12 ocean`). Middle shows the next word and left goes back. Holding right on word 12 finishes.
-2. **Backup check:** Aurora asks for 3 random positions (`WORD #07? M:NEXT`). For each, the user picks the right word from 4 candidates (middle and left cycle, hold right chooses).
+1. Aurora draws 128 bits from libsodium and shows the 12 BIP-39 words one per screen (`03/12 ocean`). A tap of right shows the next word and left goes back. Holding right on word 12 finishes.
+2. **Backup check:** Aurora asks for 3 random positions (`WORD #07? R:NEXT`). For each, the user picks the right word from 4 candidates (tapping right or left cycles, holding right chooses).
 3. A wrong answer goes back to the words. Nothing is saved until all 3 are right.
 4. Without a password and with `pin_enabled`, the user then sets a PIN on the device.
 5. The wallet is saved, and the result is `{"created":true,"shown":true,"has_seed":true,"backup_confirmed":true,"pubkey":"…","pin_protected":…}`.
@@ -139,7 +139,7 @@ funds in any BIP-39 wallet, and erasing Aurora starts over.
 
 ### Device menu
 
-Middle on the home screen opens `WALLETS`, `DISCONNECT APP`, `ERASE WALLET`
+Tapping right on the home screen opens `WALLETS`, `DISCONNECT APP`, `ERASE WALLET`
 and `ABOUT`; the menu closes after 60 s. While the app is disconnected from the
 menu, every command (`ping` too) gets `app_disconnected` until
 `CONNECT APP` is chosen.
