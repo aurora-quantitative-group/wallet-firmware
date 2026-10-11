@@ -157,11 +157,12 @@ TEST(failed_handshake_keeps_existing_channel) {
   std::copy(d.begin(), d.end(), dev.begin());
   std::copy(s.begin(), s.end(), sig.begin());
   std::string err;
-  REQUIRE(client.clientComplete(dev, *decodeAddress(kAbandonAddress), sig, err));
+  REQUIRE(client.clientComplete(dev, h.identity.publicKey(), sig, err));
 
   CHECK_EQ(h.send({{"cmd", "handshake"}, {"client_pubkey", base64Encode(Bytes(32, 0))}})["error"],
            "handshake_failed");
-  r = h.sendRaw(json{{"enc", client.seal("{\"id\":5,\"cmd\":\"ping\"}")}}.dump());
+  r = h.sendRaw(json{{"enc", client.seal(Harness::envelope({{"id", 5}, {"cmd", "ping"}}).dump())}}
+                    .dump());
   std::string plain;
   REQUIRE(r.contains("enc"));
   REQUIRE(client.open(r["enc"].get<std::string>(), plain, err));

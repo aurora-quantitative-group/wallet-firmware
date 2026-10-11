@@ -188,7 +188,7 @@ TEST(sign_busy_cancel_timeout_and_disconnect) {
   h.boot();
   h.send(signReq(kTransferMsgHex, "medium", 1));
   CHECK_EQ(h.send(signReq(kTransferMsgHex, "low", 2))["error"], "busy");
-  CHECK_EQ(h.send({{"cmd", "ping"}})["busy"], true);
+  CHECK_EQ(h.pingPayload()["busy"], true);
   CHECK_EQ(h.send({{"cmd", "get_pubkey"}})["ok"], true);
   json r = h.run(10100);
   CHECK_EQ(r["error"], "timeout");
@@ -206,14 +206,14 @@ TEST(sign_busy_cancel_timeout_and_disconnect) {
   CHECK_EQ(h.top(), std::string("DISCONNECTED"));
 }
 
-TEST(sign_missing_risk_defaults_to_medium) {
+TEST(sign_missing_risk_lets_the_device_decide) {
   Harness h;
   h.preinit();
   h.boot();
   trustRecipient(h);
   h.send({{"cmd", "sign_tx"}, {"message", b64msg(kTransferMsgHex)}, {"reason", "model timeout"}});
-  CHECK(h.colorIs(kMedium));
+  CHECK(h.colorIs(kLow));  // known recipient, no app verdict: the device rule decides
   h.clicks(Button::Middle, 3);
-  CHECK_EQ(h.top(), std::string("RISK: MEDIUM"));
+  CHECK_EQ(h.top(), std::string("RISK: LOW"));
   CHECK_EQ(h.bottom(), std::string("model timeout"));
 }

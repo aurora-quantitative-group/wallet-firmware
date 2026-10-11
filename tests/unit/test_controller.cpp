@@ -10,11 +10,14 @@ TEST(ctrl_ping_and_protocol_errors) {
   h.boot();
   json r = h.send({{"id", "a1"}, {"cmd", "ping"}});
   CHECK_EQ(r["ok"], true);
-  CHECK_EQ(r["pong"], true);
   CHECK_EQ(r["id"], "a1");
-  CHECK_EQ(r["state"], "uninitialized");
-  CHECK_EQ(r["protocol"], 1);
-  CHECK_EQ(r["version"].get<std::string>(), std::string(WFW_VERSION));
+  const json p = json::parse(r["payload"].get<std::string>());
+  CHECK_EQ(p["challenge"], "test-challenge-0001");
+  CHECK_EQ(p["has_seed"], false);
+  CHECK(p["wallets"].empty());
+  CHECK_EQ(p["state"], "uninitialized");
+  CHECK_EQ(p["protocol"], 2);
+  CHECK_EQ(p["firmware"].get<std::string>(), std::string(WFW_VERSION));
 
   r = h.sendRaw("nonsense");
   CHECK_EQ(r["error"], "invalid_json");
@@ -26,10 +29,10 @@ TEST(ctrl_ping_and_protocol_errors) {
   CHECK_EQ(r["id"], 7);
   CHECK_EQ(h.send({{"cmd", "get_pubkey"}})["error"], "not_initialized");
   CHECK_EQ(h.send({{"cmd", "sign_tx"}, {"message", "AA=="}})["error"], "not_initialized");
-  CHECK_EQ(h.send({{"cmd", "show_words"}})["error"], "not_initialized");
+  CHECK_EQ(h.send({{"cmd", "show_seed"}})["error"], "not_initialized");
   h.ctrl->onOverflow();
   CHECK_EQ(h.out.back()["error"], "line_too_long");
-  CHECK_EQ(h.top(), std::string("SOLPI WALLET"));
+  CHECK_EQ(h.top(), std::string("AURORA"));
 }
 
 TEST(ctrl_setup_shows_words_and_creates_wallet) {
@@ -40,7 +43,7 @@ TEST(ctrl_setup_shows_words_and_creates_wallet) {
   CHECK(h.colorIs(kSetup));
   CHECK(h.buzzerHw.onCount >= 1);
   CHECK_EQ(h.send({{"cmd", "setup"}})["error"], "busy");
-  CHECK_EQ(h.send({{"cmd", "ping"}})["busy"], true);
+  CHECK_EQ(h.pingPayload()["busy"], true);
 
   h.click(Button::Middle);
   CHECK_EQ(h.top(), std::string("01/12 abandon"));
@@ -58,19 +61,26 @@ TEST(ctrl_setup_shows_words_and_creates_wallet) {
   CHECK(h.click(Button::Right).is_null());  // a short press is not enough
   CHECK(h.keystore->status() == wfw::storage::Keystore::Status::Empty);
 
-  json r = h.hold(Button::Right);
+  CHECK(h.hold(Button::Right).is_null());  // now the on-device backup check
+  CHECK(h.top().rfind("WORD #", 0) == 0);
+  CHECK(h.keystore->status() == wfw::storage::Keystore::Status::Empty);
+  std::vector<std::string> words(11, "abandon");
+  words.push_back("about");
+  h.passQuiz(words);
+  json r = h.out.back();
   CHECK_EQ(r["id"], 1);
   CHECK_EQ(r["ok"], true);
   CHECK_EQ(r["pubkey"], kAbandonAddress);
-  CHECK_EQ(r["backup_confirmed"], false);
+  CHECK_EQ(r["backup_confirmed"], true);
   CHECK_EQ(h.top(), std::string("WALLET CREATED"));
 
+  const std::string name = "Aurora " + h.identity.deviceId().substr(0, 4);
   r = h.send({{"cmd", "get_pubkey"}});
   CHECK_EQ(r["pubkey"], kAbandonAddress);
-  CHECK_EQ(r["name"], "SolPi-HAgk");
+  CHECK_EQ(r["name"], name);
   CHECK_EQ(h.send({{"cmd", "setup"}})["error"], "already_initialized");
   h.run(4000);
-  CHECK_EQ(h.top(), std::string("SolPi-HAgk"));
+  CHECK_EQ(h.top(), name);
   CHECK_EQ(h.bottom(), std::string("HAgk..Kpqk"));
 }
 
@@ -95,37 +105,42 @@ TEST(ctrl_setup_cancel_and_timeout) {
   CHECK(!h.ctrl->sessionActive());
 }
 
-TEST(ctrl_backup_reshow_and_confirm) {
+TEST(ctrl_backup_is_checked_on_the_device) {
   Harness h;
   h.boot();
-  h.send({{"cmd", "setup"}});
-  const std::string words = h.readWordsAndConfirm();
-  CHECK_EQ(words, std::string(kAbandonMnemonic));
-  REQUIRE(h.keystore->initialized());
-
-  // App's "back" button: show the words again.
-  CHECK(h.send({{"id", 9}, {"cmd", "show_words"}}).is_null());
-  CHECK_EQ(h.readWordsAndConfirm(), words);
-  CHECK_EQ(h.out.back()["id"], 9);
+  h.send({{"id", 1}, {"cmd", "setup"}});
+  h.click(Button::Middle);
+  std::vector<std::string> words;
+  for (int i = 0; i < 12; ++i) {
+    words.push_back(h.top().substr(6));
+    if (i < 11) h.click(Button::Middle);
+  }
+  h.hold(Button::Right);
+  // A wrong word sends the user back to the words; nothing is saved.
+  REQUIRE(h.answerQuestion(words, /*correctly=*/false));
+  CHECK_EQ(h.top(), std::string("WRITE DOWN THE"));
+  CHECK_EQ(h.bottom(), std::string("WRONG WORD! M:GO"));
+  CHECK(!h.keystore->initialized());
+  CHECK(h.out.empty());
+  CHECK_EQ(h.readWordsAndConfirm(), std::string(kAbandonMnemonic));
   CHECK_EQ(h.out.back()["ok"], true);
-
-  CHECK_EQ(h.send({{"cmd", "confirm_backup"}})["error"], "invalid_request");
-  json r = h.send({{"cmd", "confirm_backup"},
-                   {"words", "abandon abandon abandon abandon abandon abandon abandon abandon "
-                             "abandon abandon abandon abandon"}});
-  CHECK_EQ(r["error"], "phrase_mismatch");
-  r = h.send({{"cmd", "confirm_backup"},
-              {"words", "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong"}});
-  CHECK_EQ(r["error"], "phrase_mismatch");
-  CHECK(!h.keystore->backupConfirmed());
-
-  r = h.send({{"cmd", "confirm_backup"}, {"words", "  ABANDON " + words.substr(8) + "\n"}});
-  CHECK_EQ(r["ok"], true);
   CHECK(h.keystore->backupConfirmed());
-  CHECK_EQ(h.send({{"cmd", "get_pubkey"}})["backup_confirmed"], true);
-  CHECK_EQ(h.send({{"cmd", "show_words"}})["error"], "backup_already_confirmed");
-  CHECK_EQ(h.send({{"cmd", "confirm_backup"}, {"words", words}})["error"],
-           "backup_already_confirmed");
+  // Never shown again once confirmed; typed-in phrases are not accepted.
+  CHECK_EQ(h.send({{"cmd", "show_seed"}})["error"], "backup_already_confirmed");
+  CHECK_EQ(h.send({{"cmd", "confirm_backup"}, {"words", kAbandonMnemonic}})["error"],
+           "unknown_cmd");
+}
+
+TEST(ctrl_show_seed_finishes_an_unchecked_backup) {
+  Harness h;
+  h.preinit();  // a wallet whose backup was never checked
+  h.boot();
+  CHECK(!h.keystore->backupConfirmed());
+  CHECK(h.send({{"id", 9}, {"cmd", "show_seed"}}).is_null());
+  CHECK_EQ(h.readWordsAndConfirm(), std::string(kAbandonMnemonic));
+  CHECK_EQ(h.out.back()["id"], 9);
+  CHECK_EQ(h.out.back()["backup_confirmed"], true);
+  CHECK(h.keystore->backupConfirmed());
 }
 
 TEST(ctrl_hold_must_start_on_last_word) {
@@ -143,7 +158,10 @@ TEST(ctrl_hold_must_start_on_last_word) {
   h.raw[2] = false;
   h.run(100);
   CHECK(!h.keystore->initialized());
-  CHECK(!h.hold(Button::Right).is_null());
+  h.hold(Button::Right);
+  std::vector<std::string> words(11, "abandon");
+  words.push_back("about");
+  h.passQuiz(words);
   CHECK(h.keystore->initialized());
 }
 
@@ -152,11 +170,11 @@ TEST(ctrl_display_failure_blocks_prompts) {
   h.preinit();
   h.display.broken = true;
   h.boot();
-  CHECK_EQ(h.send({{"cmd", "ping"}})["display_ok"], false);
+  CHECK_EQ(h.pingPayload()["display_ok"], false);
   CHECK_EQ(h.send({{"cmd", "sign_tx"}, {"message", b64msg(kTransferMsgHex)}})["error"],
            "display_unavailable");
   h.display.broken = false;
   h.run(1100);  // renderer retries once a second
-  CHECK_EQ(h.send({{"cmd", "ping"}})["display_ok"], true);
+  CHECK_EQ(h.pingPayload()["display_ok"], true);
   CHECK(h.send({{"cmd", "sign_tx"}, {"message", b64msg(kTransferMsgHex)}}).is_null());
 }

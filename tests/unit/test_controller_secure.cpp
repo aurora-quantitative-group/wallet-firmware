@@ -26,7 +26,8 @@ bool handshake(Harness& h, crypto::SecureChannel& client) {
   std::copy(dev.begin(), dev.end(), devEph.begin());
   std::copy(sig.begin(), sig.end(), sigArr.begin());
   std::string err;
-  return client.clientComplete(devEph, *decodeAddress(r["pubkey"].get<std::string>()), sigArr, err);
+  return client.clientComplete(devEph, *decodeAddress(r["device_id"].get<std::string>()), sigArr,
+                               err);
 }
 
 json openReply(crypto::SecureChannel& client, const json& frame) {
@@ -35,7 +36,7 @@ json openReply(crypto::SecureChannel& client, const json& frame) {
   if (!frame.contains("enc") || !client.open(frame["enc"].get<std::string>(), plain, err)) {
     return json();
   }
-  return json::parse(plain);
+  return Harness::normalise(json::parse(plain));
 }
 
 }  // namespace
@@ -112,16 +113,16 @@ TEST(channel_handshake_and_encrypted_requests) {
   Harness h;
   h.preinit();
   h.boot();
-  CHECK_EQ(h.send({{"cmd", "ping"}, {"id", 1}})["secure_channel"], false);
+  CHECK_EQ(json::parse(h.send({{"cmd", "ping"}})["payload"].get<std::string>())["secure_channel"],
+           false);
   CHECK_EQ(h.send({{"enc", "AAAA"}})["error"], "no_secure_channel");
 
   crypto::SecureChannel client(crypto::SecureChannel::Role::Client);
   REQUIRE(handshake(h, client));
-  const std::string frame = client.seal(json{{"id", 2}, {"cmd", "ping"}}.dump());
+  const std::string frame = client.seal(Harness::envelope({{"id", 2}, {"cmd", "ping"}}).dump());
   json r = openReply(client, h.sendRaw(json{{"enc", frame}}.dump()));
-  CHECK_EQ(r["pong"], true);
   CHECK_EQ(r["id"], 2);
-  CHECK_EQ(r["secure_channel"], true);
+  CHECK_EQ(json::parse(r["payload"].get<std::string>())["secure_channel"], true);
 
   // Replays and forgeries are refused (in plaintext: no key to answer with).
   r = h.sendRaw(json{{"enc", frame}}.dump());
@@ -129,11 +130,13 @@ TEST(channel_handshake_and_encrypted_requests) {
   CHECK_EQ(h.send({{"enc", 5}})["error"], "invalid_request");
 
   // The channel survives errors; the next in-order frame still works.
-  r = openReply(client, h.sendRaw(json{{"enc", client.seal("{\"cmd\":\"get_pubkey\"}")}}.dump()));
+  r = openReply(client,
+                h.sendRaw(json{{"enc", client.seal("{\"command\":\"get_pubkey\"}")}}.dump()));
   CHECK_EQ(r["pubkey"], kAbandonAddress);
 
   h.ctrl->onLinkReset();
-  CHECK_EQ(h.send({{"cmd", "ping"}})["secure_channel"], false);
+  r = h.send({{"cmd", "ping"}});
+  CHECK_EQ(json::parse(r["payload"].get<std::string>())["secure_channel"], false);
 }
 
 TEST(channel_required_blocks_plaintext_signing) {
@@ -149,7 +152,8 @@ TEST(channel_required_blocks_plaintext_signing) {
 
   crypto::SecureChannel client(crypto::SecureChannel::Role::Client);
   REQUIRE(handshake(h, client));
-  CHECK(h.sendRaw(json{{"enc", client.seal(signReq(7).dump())}}.dump()).is_null());
+  CHECK(h.sendRaw(json{{"enc", client.seal(Harness::envelope(signReq(7)).dump())}}.dump())
+            .is_null());
   CHECK_EQ(h.top(), std::string("SEND 0.50 SOL"));
   const json r = openReply(client, h.hold(Button::Right));
   CHECK_EQ(r["ok"], true);
@@ -160,8 +164,9 @@ TEST(channel_required_blocks_plaintext_signing) {
 TEST(channel_handshake_errors) {
   Harness fresh;
   fresh.boot();
-  CHECK_EQ(fresh.send({{"cmd", "handshake"}, {"client_pubkey", base64Encode(Bytes(32, 9))}})["error"],
-           "not_initialized");
+  // Signed by the device identity: works before a wallet exists.
+  crypto::SecureChannel early(crypto::SecureChannel::Role::Client);
+  CHECK(handshake(fresh, early));
   Harness h;
   h.preinit();
   h.boot();

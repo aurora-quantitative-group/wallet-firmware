@@ -1,6 +1,11 @@
 #pragma once
 // Drives the real Controller with fake hardware and a manual clock, at the
 // same 5 ms sampling cadence as the firmware's main loop.
+//
+// Tests write requests as {"cmd": name, ...params}; send() wraps them in the
+// protocol v2 envelope {"id", "command", "params"} and normalise() turns v2
+// replies back into {"ok": true, ...result} / {"ok": false, "error": code,
+// "message": text}. The envelope itself is tested in test_protocol_v2.cpp.
 
 #include <sodium.h>
 
@@ -55,11 +60,13 @@ struct Harness {
   FakeBuzzer buzzerHw;
   std::unique_ptr<wfw::storage::Keystore> keystore;
   std::unique_ptr<wfw::storage::KnownRecipients> recipients;
+  wfw::storage::DeviceIdentity identity{dir.path};
   std::unique_ptr<wfw::ui::ButtonInput> buttons;
   std::unique_ptr<wfw::ui::ScreenRenderer> screen;
   std::unique_ptr<wfw::ui::BuzzerController> buzzer;
   std::unique_ptr<wfw::device::Controller> ctrl;
-  std::vector<json> out;
+  std::vector<json> out;  // normalised replies
+  std::vector<json> wire;  // replies exactly as sent on the wire
   std::array<bool, 3> raw{};
   uint8_t entropyFill = 0;  // new wallets: 0 -> "abandon ... about"
 
@@ -89,21 +96,55 @@ struct Harness {
     keystore->load(err);
     recipients = std::make_unique<wfw::storage::KnownRecipients>(dir.path);
     recipients->load(err);
+    const uint8_t identitySeed[32] = {42};
+    identity.setSeedForTest(identitySeed);
     buttons = std::make_unique<wfw::ui::ButtonInput>(cfg.debounceMs, cfg.holdConfirmMs);
     screen = std::make_unique<wfw::ui::ScreenRenderer>(display, clock, 100);
     screen->begin();
     buzzer = std::make_unique<wfw::ui::BuzzerController>(buzzerHw, clock, true);
     const uint8_t fill = entropyFill;
     ctrl = std::make_unique<wfw::device::Controller>(
-        wfw::device::Services{*keystore, *recipients, *screen, *buzzer, *buttons, clock, cfg,
-                              [fill](uint8_t* b, size_t n) { std::fill(b, b + n, fill); }},
-        [this](const std::string& line) { out.push_back(json::parse(line)); });
+        wfw::device::Services{*keystore, *recipients, identity, *screen, *buzzer, *buttons, clock,
+                              cfg, [fill](uint8_t* b, size_t n) { std::fill(b, b + n, fill); }},
+        [this](const std::string& line) {
+          wire.push_back(json::parse(line));
+          out.push_back(normalise(wire.back()));
+        });
     ctrl->start();
     out.clear();
   }
 
   // Sends a request; returns the reply if one arrived immediately, else null.
-  json send(const json& req) { return sendRaw(req.dump()); }
+  json send(const json& req) { return sendRaw(envelope(req).dump()); }
+  // Status fields live in ping's signed identity payload.
+  json pingPayload() { return json::parse(send({{"cmd", "ping"}})["payload"].get<std::string>()); }
+  static json envelope(const json& req) {
+    if (!req.is_object() || !req.contains("cmd")) return req;
+    json w = {{"command", req["cmd"]}, {"params", json::object()}};
+    for (const auto& [key, value] : req.items()) {
+      if (key == "id") w["id"] = value;
+      else if (key != "cmd") w["params"][key] = value;
+    }
+    if (req["cmd"] == "ping" && !w["params"].contains("challenge"))
+      w["params"]["challenge"] = "test-challenge-0001";
+    return w;
+  }
+  static json normalise(const json& reply) {
+    if (reply.contains("result")) {
+      json r = reply["result"];
+      r["ok"] = true;
+      r["id"] = reply["id"];
+      return r;
+    }
+    if (reply.contains("error")) {
+      json r = reply;
+      r["ok"] = false;
+      r["message"] = reply["error"];
+      r["error"] = reply.value("code", "");
+      return r;
+    }
+    return reply;  // encrypted frames stay as they are
+  }
   json sendRaw(const std::string& line) {
     const size_t before = out.size();
     ctrl->onLine(line);
@@ -150,17 +191,37 @@ struct Harness {
     return display.rgb[0] == c.r && display.rgb[1] == c.g && display.rgb[2] == c.b;
   }
 
-  // Walks the 12 words (reading them off the LCD) and confirms on word 12.
+  // Walks the 12 words (reading them off the LCD), confirms on word 12 and
+  // answers the on-device backup check.
   std::string readWordsAndConfirm() {
     click(Button::Middle);
+    std::vector<std::string> list;
     std::string words;
     for (int i = 0; i < 12; ++i) {
       const std::string t = top();  // "03/12 ocean"
-      words += (i ? " " : "") + t.substr(t.find(' ') + 1);
+      list.push_back(t.substr(t.find(' ') + 1));
+      words += (i ? " " : "") + list.back();
       if (i < 11) click(Button::Middle);
     }
     hold(Button::Right);
+    passQuiz(list);
     return words;
+  }
+
+  // Screen "WORD #07? M:NEXT" / "ocean        2/4": cycle to the right word.
+  bool answerQuestion(const std::vector<std::string>& words, bool correctly = true) {
+    if (top().rfind("WORD #", 0) != 0) return false;
+    const std::string want = words.at(std::stoul(top().substr(6, 2)) - 1);
+    for (int i = 0; i < 4; ++i) {
+      const std::string shown = bottom().substr(0, bottom().find(' '));
+      if ((shown == want) == correctly) break;
+      click(Button::Middle);
+    }
+    hold(Button::Right);
+    return true;
+  }
+  void passQuiz(const std::vector<std::string>& words) {
+    for (int q = 0; q < 3; ++q) answerQuestion(words);
   }
 };
 
